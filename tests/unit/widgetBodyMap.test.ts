@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildBodyMap, partitionCaseTypes } from '../../widget/src/bodyMap.js'
+import { BODY_MAP_TAGS } from '../../src/shared/bodyMap'
+import { LABELS, bodyMapStyles, buildBodyMap, partitionCaseTypes } from '../../widget/src/bodyMap.js'
 
 /**
  * The widget's body map (widget/src/bodyMap.js). The flow under test: tap a
@@ -19,7 +20,10 @@ let onSelect: ReturnType<typeof vi.fn>
 let map: HTMLElement
 
 function spot(tag: string) {
-  return map.querySelector(`[data-tag="${tag}"]`) as SVGGElement
+  return map.querySelector(`.pm-bodymap-spot[data-tag="${tag}"]`) as SVGGElement
+}
+function callout(tag: string) {
+  return map.querySelector(`.pm-bodymap-callout[data-tag="${tag}"]`) as SVGGElement
 }
 function confirmPanel() {
   return map.querySelector('.pm-bodymap-confirm') as HTMLElement
@@ -49,6 +53,20 @@ describe('partitionCaseTypes', () => {
   })
 })
 
+describe('label layout', () => {
+  it('places a label for every spot', () => {
+    expect(Object.keys(LABELS).sort()).toEqual([...BODY_MAP_TAGS].sort())
+  })
+
+  it('hides spots while zoomed with visibility, never display', () => {
+    // Toggling display on the other spots left Chrome not painting the chosen
+    // spot's pulse after zooming back out.
+    const css = bodyMapStyles('#000')
+    expect(css).toContain('.pm-bodymap-zoomed .pm-bodymap-spot{visibility:hidden;}')
+    expect(css).not.toMatch(/pm-bodymap-zoomed [^{]*spot[^{]*\{display:/)
+  })
+})
+
 describe('buildBodyMap', () => {
   it('returns null when no case type has a spot, so the widget keeps its list', () => {
     expect(buildBodyMap(document, [{ id: 'a', name: 'A', map_tag: null }], onSelect)).toBeNull()
@@ -60,7 +78,31 @@ describe('buildBodyMap', () => {
     expect(spots).toHaveLength(2)
     expect(spot('knee').getAttribute('aria-label')).toBe('Knee')
     expect(spot('knee').getAttribute('role')).toBe('button')
-    expect(spot('knee').textContent).toBe('Knee')
+    expect(callout('knee').textContent).toBe('Knee')
+  })
+
+  it('opens the zoom from a tap on the label or its leader line, not only the dot', () => {
+    callout('neck').querySelector('.pm-bodymap-label')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(map.querySelector('.pm-bodymap-heading')!.textContent).toBe('Neck Pain')
+    button(/Back/).click()
+
+    callout('knee').querySelector('.pm-bodymap-leader-hit')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(map.querySelector('.pm-bodymap-heading')!.textContent).toBe('Knee')
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('keeps labels under the dots, so a dot wins a tap that also hits a neighbouring label', () => {
+    const svg = map.querySelector('svg')!
+    const layers = Array.from(svg.children).map((el) => el.getAttribute('class'))
+    expect(layers.indexOf('pm-bodymap-labels')).toBeLessThan(layers.indexOf('pm-bodymap-dots'))
+    // Labels are decoration for screen readers; the dots carry the names.
+    expect(map.querySelector('.pm-bodymap-labels')!.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('splits a label across lines where its gap is narrow', () => {
+    const shin = buildBodyMap(document, [{ id: 's', name: 'Shin Splints', map_tag: 'shin-splints' }], onSelect)!
+    const lines = Array.from(shin.querySelectorAll('.pm-bodymap-label tspan')).map((t) => t.textContent)
+    expect(lines).toEqual(['Shin', 'Splints'])
   })
 
   it('lists case types without a spot as plain buttons that select directly', () => {

@@ -18,28 +18,66 @@ var SVG_NS = 'http://www.w3.org/2000/svg'
 /** How far the figure zooms in on a tapped spot. */
 var ZOOM = 2.6
 
+/** The drawing area: the outline plus a margin on each side for labels. */
+var VIEWBOX = { x: -40, y: 0, width: 1334, height: OUTLINE_SIZE }
+
+/** Label text size, in outline units (about 12-13px at the widget's width). */
+var LABEL_SIZE = 46
+
 /**
- * Where each label sits relative to its dot, following the mockup: labels go
- * outward, away from the body, so the cluster around the hips stays legible.
+ * Where each label sits, in outline coordinates, placed by hand in the white
+ * space around the figures -- beside the head, between the arms, beside and
+ * below the legs -- so the text can be large without covering the body or
+ * another label. A leader line joins each label to its dot. `lines` splits a
+ * label that is too wide for its gap.
+ *
+ * The text shown is the spot's label, not the case type's name, because these
+ * slots are sized for it; the case type's name is what the zoomed view and
+ * screen readers announce.
  */
-var LABEL_SIDE = {
-  shoulder: 'left',
-  clavicle: 'right',
-  elbow: 'left',
-  hand: 'below',
-  wrist: 'below',
-  pelvis: 'left',
-  hip: 'above',
-  groin: 'below',
-  knee: 'right',
-  'shin-splints': 'left',
-  ankle: 'right',
-  foot: 'left',
-  toes: 'right',
-  neck: 'right',
-  'low-back': 'right',
-  achilles: 'right',
-  heel: 'left',
+export var LABELS = {
+  shoulder: { x: 205, y: 190, anchor: 'end' },
+  clavicle: { x: 470, y: 190, anchor: 'start' },
+  elbow: { x: 140, y: 440, anchor: 'end' },
+  pelvis: { x: 140, y: 575, anchor: 'end' },
+  hand: { x: 120, y: 810, anchor: 'middle' },
+  wrist: { x: 590, y: 795, anchor: 'middle' },
+  hip: { x: 560, y: 480, anchor: 'start' },
+  groin: { x: 550, y: 878, anchor: 'start' },
+  knee: { x: 490, y: 975, anchor: 'start' },
+  'shin-splints': { x: 235, y: 975, anchor: 'end', lines: ['Shin', 'Splints'] },
+  ankle: { x: 490, y: 1090, anchor: 'start' },
+  foot: { x: 235, y: 1160, anchor: 'end' },
+  toes: { x: 490, y: 1190, anchor: 'start' },
+  neck: { x: 990, y: 170, anchor: 'start' },
+  'low-back': { x: 1110, y: 470, anchor: 'start', lines: ['Low', 'Back'] },
+  achilles: { x: 1000, y: 1080, anchor: 'start' },
+  heel: { x: 760, y: 1190, anchor: 'end' },
+}
+
+/**
+ * The label's approximate box. Text is not measured (the map is built before
+ * it is in the page), so width comes from character count; the box only
+ * decides where the leader line starts and how big the tap target is.
+ */
+function labelBox(layout, lines) {
+  var longest = lines.reduce(function (n, line) {
+    return Math.max(n, line.length)
+  }, 0)
+  var width = longest * LABEL_SIZE * 0.56
+  var height = lines.length * LABEL_SIZE * 1.05
+  var left =
+    layout.anchor === 'end' ? layout.x - width : layout.anchor === 'middle' ? layout.x - width / 2 : layout.x
+  return { left: left, top: layout.y - LABEL_SIZE * 0.8, width: width, height: height }
+}
+
+/** The point on a box nearest to p, pushed out by a small gap. */
+function nearestEdge(box, p) {
+  var gap = 8
+  return {
+    x: Math.max(box.left - gap, Math.min(p.x, box.left + box.width + gap)),
+    y: Math.max(box.top - gap, Math.min(p.y, box.top + box.height + gap)),
+  }
 }
 
 function svgEl(doc, name, attrs) {
@@ -77,6 +115,36 @@ export function partitionCaseTypes(caseTypes) {
   return { placed: placed, unplaced: unplaced }
 }
 
+/** A spot's label and the leader line from it to the dot. */
+function buildCallout(doc, spot, p) {
+  var layout = LABELS[spot.tag] || { x: p.x + 40, y: p.y + 14, anchor: 'start' }
+  var lines = layout.lines || [spot.label]
+  var box = labelBox(layout, lines)
+  var from = nearestEdge(box, p)
+
+  var g = svgEl(doc, 'g', { class: 'pm-bodymap-callout', 'data-tag': spot.tag })
+  // Wide invisible copies of the line and the label's box are the tap targets.
+  g.appendChild(svgEl(doc, 'line', { x1: from.x, y1: from.y, x2: p.x, y2: p.y, class: 'pm-bodymap-leader-hit' }))
+  g.appendChild(
+    svgEl(doc, 'rect', {
+      x: box.left - 10,
+      y: box.top - 10,
+      width: box.width + 20,
+      height: box.height + 20,
+      class: 'pm-bodymap-label-hit',
+    }),
+  )
+  g.appendChild(svgEl(doc, 'line', { x1: from.x, y1: from.y, x2: p.x, y2: p.y, class: 'pm-bodymap-leader' }))
+  var text = svgEl(doc, 'text', { class: 'pm-bodymap-label', x: layout.x, y: layout.y, 'text-anchor': layout.anchor })
+  lines.forEach(function (line, i) {
+    var tspan = svgEl(doc, 'tspan', { x: layout.x, dy: i === 0 ? 0 : LABEL_SIZE * 1.05 })
+    tspan.textContent = line
+    text.appendChild(tspan)
+  })
+  g.appendChild(text)
+  return g
+}
+
 /**
  * Builds the map, or returns null when no case type has a spot -- the widget
  * then renders its plain list exactly as before.
@@ -102,7 +170,7 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
   stage.appendChild(zoomer)
 
   var svg = svgEl(doc, 'svg', {
-    viewBox: '0 0 ' + OUTLINE_SIZE + ' ' + OUTLINE_SIZE,
+    viewBox: [VIEWBOX.x, VIEWBOX.y, VIEWBOX.width, VIEWBOX.height].join(' '),
     class: 'pm-bodymap-svg',
     role: 'group',
     'aria-label': 'Choose where it hurts',
@@ -143,8 +211,8 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
     chosen = entry
     var p = spotPoint(entry.spot)
     // Scale about the spot and move it to the centre of the stage.
-    var cx = (p.x / OUTLINE_SIZE) * 100
-    var cy = (p.y / OUTLINE_SIZE) * 100
+    var cx = ((p.x - VIEWBOX.x) / VIEWBOX.width) * 100
+    var cy = ((p.y - VIEWBOX.y) / VIEWBOX.height) * 100
     zoomer.style.transformOrigin = cx + '% ' + cy + '%'
     zoomer.style.transform =
       'translate(' + (50 - cx) + '%, ' + (50 - cy) + '%) scale(' + ZOOM + ')'
@@ -178,6 +246,13 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
     if (chosen) onSelect(chosen.caseType)
   }
 
+  // Labels and their lines go in a layer under the dots, so where a line or
+  // label's tap area crosses a neighbouring dot, the dot wins.
+  var labelLayer = svgEl(doc, 'g', { class: 'pm-bodymap-labels', 'aria-hidden': 'true' })
+  var dotLayer = svgEl(doc, 'g', { class: 'pm-bodymap-dots' })
+  svg.appendChild(labelLayer)
+  svg.appendChild(dotLayer)
+
   parts.placed.forEach(function (entry) {
     var p = spotPoint(entry.spot)
     var g = svgEl(doc, 'g', {
@@ -193,20 +268,22 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
     g.appendChild(svgEl(doc, 'circle', { cx: p.x, cy: p.y, r: 46, class: 'pm-bodymap-glow' }))
     g.appendChild(svgEl(doc, 'circle', { cx: p.x, cy: p.y, r: 24, class: 'pm-bodymap-dot' }))
 
-    var side = LABEL_SIDE[entry.spot.tag] || 'right'
-    var label = svgEl(doc, 'text', {
-      class: 'pm-bodymap-label',
-      x: side === 'left' ? p.x - 36 : side === 'right' ? p.x + 36 : p.x,
-      y: side === 'below' ? p.y + 70 : side === 'above' ? p.y - 44 : p.y + 12,
-      'text-anchor': side === 'left' ? 'end' : side === 'right' ? 'start' : 'middle',
-      'aria-hidden': 'true',
-    })
-    label.textContent = entry.caseType.name
-    g.appendChild(label)
+    var callout = buildCallout(doc, entry.spot, p)
+    labelLayer.appendChild(callout)
 
-    g.addEventListener('click', function () {
+    function open() {
       if (chosen) return
       zoomTo(entry, g)
+    }
+    // The label and its line open the spot too, so a tap that misses the dot
+    // but lands on its name or line still works.
+    g.addEventListener('click', open)
+    callout.addEventListener('click', open)
+    callout.addEventListener('mouseenter', function () {
+      g.classList.add('pm-bodymap-spot-hover')
+    })
+    callout.addEventListener('mouseleave', function () {
+      g.classList.remove('pm-bodymap-spot-hover')
     })
     g.addEventListener('keydown', function (e) {
       if (chosen) return
@@ -216,7 +293,7 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
       }
     })
     spotEls.push(g)
-    svg.appendChild(g)
+    dotLayer.appendChild(g)
   })
 
   if (parts.unplaced.length > 0) {
@@ -257,14 +334,23 @@ export function bodyMapStyles(primaryColor) {
     '.pm-bodymap-hit{fill:transparent;}',
     '.pm-bodymap-glow{fill:#c00000;opacity:0.18;transform-box:fill-box;transform-origin:center;animation:pm-bodymap-pulse 2.2s ease-in-out infinite;}',
     '.pm-bodymap-dot{fill:#c00000;stroke:#fff;stroke-width:5;}',
-    '.pm-bodymap-label{font-size:34px;font-weight:600;fill:#1e293b;paint-order:stroke;stroke:#fff;stroke-width:8px;stroke-linejoin:round;pointer-events:none;}',
-    '.pm-bodymap-spot:hover .pm-bodymap-glow,.pm-bodymap-spot:focus-visible .pm-bodymap-glow{opacity:0.4;}',
+    '.pm-bodymap-callout{cursor:pointer;}',
+    '.pm-bodymap-label{font-size:' + LABEL_SIZE + 'px;font-weight:600;fill:#1e293b;paint-order:stroke;stroke:#fff;stroke-width:9px;stroke-linejoin:round;}',
+    '.pm-bodymap-leader{stroke:#94a3b8;stroke-width:3;}',
+    '.pm-bodymap-leader-hit{stroke:transparent;stroke-width:36;}',
+    '.pm-bodymap-label-hit{fill:transparent;}',
+    '.pm-bodymap-callout:hover .pm-bodymap-label{fill:#c00000;}',
+    '.pm-bodymap-callout:hover .pm-bodymap-leader{stroke:#c00000;}',
+    '.pm-bodymap-spot:hover .pm-bodymap-glow,.pm-bodymap-spot-hover .pm-bodymap-glow,.pm-bodymap-spot:focus-visible .pm-bodymap-glow{opacity:0.4;}',
     '.pm-bodymap-spot:focus-visible .pm-bodymap-dot{stroke:' + primaryColor + ';stroke-width:9;}',
     '@keyframes pm-bodymap-pulse{0%,100%{transform:scale(0.85);}50%{transform:scale(1.15);}}',
     // Zoomed: only the chosen spot stays; its label moves to the heading.
-    '.pm-bodymap-zoomed .pm-bodymap-spot{display:none;}',
-    '.pm-bodymap-zoomed .pm-bodymap-spot-active{display:inline;cursor:default;}',
-    '.pm-bodymap-zoomed .pm-bodymap-label{display:none;}',
+    // Hidden with visibility, not display: taking the other spots out of the
+    // render tree and back left Chrome no longer painting the chosen spot's
+    // pulse after zooming out.
+    '.pm-bodymap-zoomed .pm-bodymap-spot{visibility:hidden;}',
+    '.pm-bodymap-zoomed .pm-bodymap-spot-active{visibility:visible;cursor:default;}',
+    '.pm-bodymap-zoomed .pm-bodymap-labels{visibility:hidden;}',
     // Hidden but still taking its space, so zooming never moves it.
     '.pm-bodymap-zoomed .pm-bodymap-other{visibility:hidden;}',
     '.pm-bodymap-confirm{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;flex-direction:column;justify-content:space-between;padding:12px;pointer-events:none;}',
