@@ -43,7 +43,7 @@ export var LABELS = {
   hand: { x: 120, y: 810, anchor: 'middle' },
   wrist: { x: 610, y: 615, anchor: 'start' },
   hip: { x: 560, y: 480, anchor: 'start' },
-  groin: { x: 425, y: 710, anchor: 'start' },
+  groin: { x: 385, y: 748, anchor: 'start' },
   knee: { x: 450, y: 866, anchor: 'start' },
   'shin-splints': { x: 235, y: 975, anchor: 'end', lines: ['Shin', 'Splints'] },
   ankle: { x: 490, y: 1090, anchor: 'start' },
