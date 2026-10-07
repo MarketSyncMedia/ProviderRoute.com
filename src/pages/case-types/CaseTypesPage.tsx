@@ -9,6 +9,7 @@ import {
   updateCaseTypeOrders,
 } from '../../lib/api/caseTypes'
 import type { CaseType } from '../../types/database'
+import { MapSpotSelect, SuggestMapTagsButton } from './BodyMapControls'
 
 export default function CaseTypesPage() {
   return (
@@ -33,6 +34,8 @@ export default function CaseTypesPage() {
         emptyDescription: 'Add case types like Knee, Shoulder, Hip',
       }}
       icon={<Stethoscope className="h-10 w-10" />}
+      rowExtra={(caseType, all) => <MapSpotSelect caseType={caseType} all={all} />}
+      toolbarExtra={(all) => <SuggestMapTagsButton all={all} />}
     />
   )
 }

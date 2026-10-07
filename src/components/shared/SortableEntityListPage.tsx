@@ -85,12 +85,14 @@ function SortableEntityRow<T extends SortableEntity>({
   entity,
   offeringCount,
   singularLower,
+  extra,
   onEdit,
   onArchive,
 }: {
   entity: T
   offeringCount: number
   singularLower: string
+  extra?: ReactNode
   onEdit: () => void
   onArchive: () => void
 }) {
@@ -119,6 +121,7 @@ function SortableEntityRow<T extends SortableEntity>({
         <GripVertical className="h-5 w-5" />
       </button>
       <span className="flex-1 text-sm font-medium text-slate-900">{entity.name}</span>
+      {extra}
       <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
         {offeringCount}
       </span>
@@ -148,6 +151,8 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   api,
   copy,
   icon,
+  rowExtra,
+  toolbarExtra,
 }: {
   /**
    * Key prefix for this page's own query; the org id is appended. Must be
@@ -165,6 +170,10 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   api: SortableEntityApi<T>
   copy: SortableEntityCopy
   icon: ReactNode
+  /** Page-specific controls rendered in each row, before the count badge. */
+  rowExtra?: (entity: T, all: T[]) => ReactNode
+  /** Page-specific controls rendered beside the add button. */
+  toolbarExtra?: (all: T[]) => ReactNode
 }) {
   const orgId = useAuthStore((s) => s.org?.id ?? '')
   const queryClient = useQueryClient()
@@ -367,7 +376,8 @@ export default function SortableEntityListPage<T extends SortableEntity>({
 
   return (
     <div>
-      <div className="mb-6 flex justify-end">
+      <div className="mb-6 flex justify-end gap-3">
+        {toolbarExtra && rows.length > 0 ? toolbarExtra(items) : null}
         <button
           type="button"
           className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
@@ -405,6 +415,7 @@ export default function SortableEntityListPage<T extends SortableEntity>({
                   entity={entity}
                   offeringCount={offeringCount}
                   singularLower={copy.singularLower}
+                  extra={rowExtra?.(entity, items)}
                   onEdit={() => openEdit(entity)}
                   onArchive={() => setModal({ type: 'archive', payload: entity })}
                 />

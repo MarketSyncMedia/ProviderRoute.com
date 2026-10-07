@@ -19,6 +19,7 @@ const caseType = (over: Partial<CaseType> = {}): CaseType =>
     org_id: 'org1',
     name: 'Knee Pain',
     order_rank: 0,
+    map_tag: null,
     is_archived: false,
     created_at: '',
     updated_at: '',
@@ -32,6 +33,7 @@ const api = vi.hoisted(() => ({
   updateCaseType: vi.fn(),
   updateCaseTypeOrders: vi.fn(),
   archiveCaseType: vi.fn(),
+  updateCaseTypeMapTag: vi.fn(),
 }))
 
 vi.mock('../../src/lib/api/caseTypes', () => api)
@@ -75,6 +77,7 @@ beforeEach(() => {
   api.createCaseType.mockResolvedValue({ error: null })
   api.updateCaseType.mockResolvedValue({ error: null })
   api.archiveCaseType.mockResolvedValue({ error: null })
+  api.updateCaseTypeMapTag.mockResolvedValue({ error: null })
 })
 
 describe('CaseTypesPage modal state', () => {
@@ -185,6 +188,72 @@ describe('CaseTypesPage modal state', () => {
     await user.click(screen.getByRole('button', { name: /add case type/i }))
 
     expect(await screen.findByRole('textbox')).toHaveValue('')
+  })
+})
+
+describe('CaseTypesPage body map spots', () => {
+  it('links a case type to the spot picked for it', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const select = await screen.findByRole('combobox', { name: 'Body map spot for Knee Pain' })
+    expect(select).toHaveValue('')
+
+    await user.selectOptions(select, 'knee')
+
+    expect(api.updateCaseTypeMapTag).toHaveBeenCalledWith('ct1', 'knee')
+  })
+
+  it('unlinks with null, not an empty string', async () => {
+    api.getCaseTypes.mockResolvedValue([caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' })])
+    const user = userEvent.setup()
+    renderPage()
+    const select = await screen.findByRole('combobox', { name: 'Body map spot for Knee Pain' })
+    expect(select).toHaveValue('knee')
+
+    await user.selectOptions(select, '')
+
+    expect(api.updateCaseTypeMapTag).toHaveBeenCalledWith('ct1', null)
+  })
+
+  it('disables a spot another case type holds', async () => {
+    api.getCaseTypes.mockResolvedValue([
+      caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' }),
+      caseType({ id: 'ct2', name: 'Shoulder Pain', sort_order: 1 }),
+    ])
+    renderPage()
+    const select = await screen.findByRole('combobox', { name: 'Body map spot for Shoulder Pain' })
+
+    expect(within(select).getByRole('option', { name: 'Knee (used by Knee Pain)' })).toBeDisabled()
+    expect(within(select).getByRole('option', { name: 'Shoulder' })).toBeEnabled()
+  })
+
+  it('applies only the suggestions left ticked', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Knee Pain')
+
+    await user.click(screen.getByRole('button', { name: /suggest body map matches/i }))
+    const review = await screen.findByRole('dialog', { name: /suggested body map matches/i })
+    expect(api.updateCaseTypeMapTag).not.toHaveBeenCalled()
+
+    await user.click(within(review).getByRole('checkbox', { name: /shoulder pain/i }))
+    await user.click(within(review).getByRole('button', { name: 'Apply 1' }))
+
+    await waitFor(() => expect(api.updateCaseTypeMapTag).toHaveBeenCalledTimes(1))
+    expect(api.updateCaseTypeMapTag).toHaveBeenCalledWith('ct1', 'knee')
+  })
+
+  it('writes nothing when the review is cancelled', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Knee Pain')
+
+    await user.click(screen.getByRole('button', { name: /suggest body map matches/i }))
+    const review = await screen.findByRole('dialog', { name: /suggested body map matches/i })
+    await user.click(within(review).getByRole('button', { name: /cancel/i }))
+
+    expect(screen.queryByRole('dialog', { name: /suggested body map matches/i })).not.toBeInTheDocument()
+    expect(api.updateCaseTypeMapTag).not.toHaveBeenCalled()
   })
 })
 
