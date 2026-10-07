@@ -291,11 +291,27 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
     // but lands on its name or line still works.
     g.addEventListener('click', open)
     callout.addEventListener('click', open)
-    callout.addEventListener('mouseenter', function () {
-      g.classList.add('pm-bodymap-spot-hover')
+    // Pointing at either half of a spot -- the dot, or its label and line --
+    // highlights both, so it is always clear which name goes with which dot.
+    function highlight(on) {
+      g.classList.toggle('pm-bodymap-spot-hover', on)
+      callout.classList.toggle('pm-bodymap-callout-hover', on)
+    }
+    ;[g, callout].forEach(function (el) {
+      el.addEventListener('mouseenter', function () {
+        highlight(true)
+      })
+      el.addEventListener('mouseleave', function () {
+        highlight(false)
+      })
     })
-    callout.addEventListener('mouseleave', function () {
-      g.classList.remove('pm-bodymap-spot-hover')
+    // Keyboard focus too -- but not the focus a click or Back leaves behind,
+    // which would keep a label lit after the pointer has moved on.
+    g.addEventListener('focus', function () {
+      if (g.matches && g.matches(':focus-visible')) highlight(true)
+    })
+    g.addEventListener('blur', function () {
+      highlight(false)
     })
     g.addEventListener('keydown', function (e) {
       if (chosen) return
@@ -351,8 +367,8 @@ export function bodyMapStyles(primaryColor) {
     '.pm-bodymap-leader{stroke:#94a3b8;stroke-width:3;}',
     '.pm-bodymap-leader-hit{stroke:transparent;stroke-width:36;}',
     '.pm-bodymap-label-hit{fill:transparent;}',
-    '.pm-bodymap-callout:hover .pm-bodymap-label{fill:#c00000;}',
-    '.pm-bodymap-callout:hover .pm-bodymap-leader{stroke:#c00000;}',
+    '.pm-bodymap-callout-hover .pm-bodymap-label{fill:#c00000;}',
+    '.pm-bodymap-callout-hover .pm-bodymap-leader{stroke:#c00000;}',
     '.pm-bodymap-spot:hover .pm-bodymap-glow,.pm-bodymap-spot-hover .pm-bodymap-glow,.pm-bodymap-spot:focus-visible .pm-bodymap-glow{opacity:0.4;}',
     '.pm-bodymap-spot:focus-visible .pm-bodymap-dot{stroke:' + primaryColor + ';stroke-width:9;}',
     '@keyframes pm-bodymap-pulse{0%,100%{transform:scale(0.85);}50%{transform:scale(1.15);}}',

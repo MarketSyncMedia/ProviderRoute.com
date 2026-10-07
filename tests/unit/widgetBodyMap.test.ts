@@ -91,6 +91,27 @@ describe('buildBodyMap', () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 
+  it('highlights the dot and its label together, whichever one is hovered', () => {
+    const lit = () => [
+      spot('knee').classList.contains('pm-bodymap-spot-hover'),
+      callout('knee').classList.contains('pm-bodymap-callout-hover'),
+    ]
+
+    spot('knee').dispatchEvent(new MouseEvent('mouseenter'))
+    expect(lit()).toEqual([true, true])
+    spot('knee').dispatchEvent(new MouseEvent('mouseleave'))
+    expect(lit()).toEqual([false, false])
+
+    callout('knee').dispatchEvent(new MouseEvent('mouseenter'))
+    expect(lit()).toEqual([true, true])
+    callout('knee').dispatchEvent(new MouseEvent('mouseleave'))
+    expect(lit()).toEqual([false, false])
+
+    // Only the hovered spot lights up.
+    spot('knee').dispatchEvent(new MouseEvent('mouseenter'))
+    expect(callout('neck').classList.contains('pm-bodymap-callout-hover')).toBe(false)
+  })
+
   it('keeps labels under the dots, so a dot wins a tap that also hits a neighbouring label', () => {
     const svg = map.querySelector('svg')!
     const layers = Array.from(svg.children).map((el) => el.getAttribute('class'))
