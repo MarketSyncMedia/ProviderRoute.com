@@ -1,5 +1,6 @@
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../src/shared/avatarPalette'
 import { readableTextColor } from '../../src/shared/colorContrast'
+import { bodyMapStyles, buildBodyMap } from './bodyMap'
 
 ;(function () {
   'use strict'
@@ -396,6 +397,7 @@ import { readableTextColor } from '../../src/shared/colorContrast'
         '.pm-disclaimer{font-size:11px;color:#94a3b8;text-align:center;padding:8px;border-top:1px solid #f1f5f9;margin-top:8px;}',
         '.pm-field-col{display:flex;flex-direction:column;gap:8px;}',
         '@media(max-width:480px){.pm-chat{width:100vw;height:100vh;max-height:100vh;border-radius:0;position:fixed;top:0;left:0;}}',
+        bodyMapStyles(primaryColor),
       ].join('')
       this.shadow.appendChild(style)
     },
@@ -709,23 +711,36 @@ import { readableTextColor } from '../../src/shared/colorContrast'
 
     renderCaseTypes: function (q) {
       var self = this
+      var caseTypes = this.data.caseTypes || []
+      // The one path for choosing a case type, whether from the body map or
+      // the list, so both filter and track identically.
+      function select(ct) {
+        self.state.selectedCaseTypeId = ct.id
+        self.state.activeOfferings = (self.data.offerings || []).filter(function (o) {
+          return o.case_type_id === ct.id
+        })
+        self.trackEvent('case_type_selected', null, null, ct.id)
+        self.handleAnswer(q, ct.id, ct.name)
+      }
+      var body = this.shadow.getElementById('pm-body')
+      // Orgs that linked case types to body map spots get the map; everyone
+      // else gets the list exactly as before.
+      var map = buildBodyMap(document, caseTypes, select)
+      if (map) {
+        if (body) body.appendChild(map)
+        return
+      }
       var opts = document.createElement('div')
       opts.className = 'pm-options'
-      ;(this.data.caseTypes || []).forEach(function (ct) {
+      caseTypes.forEach(function (ct) {
         var btn = document.createElement('button')
         btn.className = 'pm-option'
         btn.textContent = ct.name
         btn.onclick = function () {
-          self.state.selectedCaseTypeId = ct.id
-          self.state.activeOfferings = (self.data.offerings || []).filter(function (o) {
-            return o.case_type_id === ct.id
-          })
-          self.trackEvent('case_type_selected', null, null, ct.id)
-          self.handleAnswer(q, ct.id, ct.name)
+          select(ct)
         }
         opts.appendChild(btn)
       })
-      var body = this.shadow.getElementById('pm-body')
       if (body) body.appendChild(opts)
     },
 
@@ -960,7 +975,7 @@ import { readableTextColor } from '../../src/shared/colorContrast'
       var body = this.shadow.getElementById('pm-body')
       if (body) {
         var toRemove = body.querySelectorAll(
-          '.pm-options,.pm-number-wrap,.pm-field-col,.pm-select,.pm-next-btn,.pm-back-btn'
+          '.pm-options,.pm-bodymap,.pm-number-wrap,.pm-field-col,.pm-select,.pm-next-btn,.pm-back-btn'
         )
         toRemove.forEach(function (el) {
           el.remove()

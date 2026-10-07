@@ -124,7 +124,7 @@ serve(async (req) => {
         .eq('is_archived', false),
       supabase
         .from('case_types')
-        .select('id,name,sort_order')
+        .select('id,name,sort_order,map_tag')
         .eq('org_id', orgId)
         .eq('is_archived', false)
         .order('name'),
