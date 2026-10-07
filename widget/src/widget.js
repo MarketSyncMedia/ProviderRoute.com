@@ -127,6 +127,14 @@ import { bodyMapStyles, buildBodyMap } from './bodyMap'
     widgetId: null,
     data: null,
     shadow: null,
+    // 'loading' until the config fetch settles, then 'ready' or 'unavailable'.
+    // Host pages should read this rather than inferring from `data`, which is
+    // also null while the fetch is still in flight.
+    loadState: 'idle',
+    // Why loadState is 'unavailable': 'domain' (host not on the allowlist),
+    // 'load' (fetch failed or widget not published) or 'config'.
+    unavailableReason: null,
+    _pendingOpen: false,
     state: {
       phase: 'questions',
       currentQuestionIndex: 0,
@@ -159,17 +167,32 @@ import { bodyMapStyles, buildBodyMap } from './bodyMap'
       }
       if (!supabaseBaseUrl || !supabaseAnonKey || !this.state.sessionId) {
         console.warn('ProviderRoute: Secure runtime configuration is unavailable')
+        this.loadState = 'unavailable'
+        this.unavailableReason = 'config'
         return
       }
       var self = this
+      this.loadState = 'loading'
       this.fetchData().then(function () {
         if (self.data) {
           self.checkDomain()
           if (self.data) {
             self.state.activeOfferings = self.data.offerings || []
+            self.loadState = 'ready'
             self.injectWidget()
+            // A trigger was clicked before the config arrived: honor it now.
+            if (self._pendingOpen) {
+              self._pendingOpen = false
+              self.open()
+            }
+            return
           }
+          self.unavailableReason = 'domain'
+        } else {
+          self.unavailableReason = 'load'
         }
+        self._pendingOpen = false
+        self.loadState = 'unavailable'
       })
     },
 
@@ -1837,10 +1860,15 @@ import { bodyMapStyles, buildBodyMap } from './bodyMap'
    * open_delay_enabled is on, and clicking a node that isn't there yet is a
    * silent no-op. This always opens immediately: it cancels any pending
    * delay timer so the floating button doesn't also pop up afterward, and
-   * is a safe no-op if the chat is already open or the widget hasn't
-   * finished loading yet.
+   * is a safe no-op if the chat is already open. If the widget's config is
+   * still loading, the request is remembered and applied as soon as it lands,
+   * so an early click is never lost.
    */
   widget.open = function () {
+    if (this.loadState === 'loading') {
+      this._pendingOpen = true
+      return
+    }
     if (!this.data || !this.shadow) return
     if (this._delayTimer) {
       clearTimeout(this._delayTimer)
