@@ -56,6 +56,16 @@ export async function updateCaseType(id: string, name: string): Promise<{ error:
   return { error: error?.message ?? null }
 }
 
+/** Links a case type to a body map spot, or unlinks it with `null`. */
+export async function updateCaseTypeMapTag(
+  id: string,
+  mapTag: string | null,
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('case_types').update({ map_tag: mapTag }).eq('id', id)
+
+  return { error: error?.message ?? null }
+}
+
 export async function updateCaseTypeOrders(
   updates: Array<{ id: string; sort_order: number }>
 ): Promise<{ error: string | null }> {

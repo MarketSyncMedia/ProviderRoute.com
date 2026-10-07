@@ -88,6 +88,7 @@ export type Database = {
           created_at: string | null
           id: string
           is_archived: boolean | null
+          map_tag: string | null
           name: string
           org_id: string
           sort_order: number
@@ -97,6 +98,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           is_archived?: boolean | null
+          map_tag?: string | null
           name: string
           org_id: string
           sort_order?: number
@@ -106,6 +108,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           is_archived?: boolean | null
+          map_tag?: string | null
           name?: string
           org_id?: string
           sort_order?: number
