@@ -68,16 +68,28 @@ function labelBox(layout, lines) {
   var height = lines.length * LABEL_SIZE * 1.05
   var left =
     layout.anchor === 'end' ? layout.x - width : layout.anchor === 'middle' ? layout.x - width / 2 : layout.x
-  return { left: left, top: layout.y - LABEL_SIZE * 0.8, width: width, height: height }
+  return { left: left, top: layout.y - LABEL_SIZE * 0.95, width: width, height: height + LABEL_SIZE * 0.15 }
 }
 
-/** The point on a box nearest to p, pushed out by a small gap. */
-function nearestEdge(box, p) {
+/**
+ * Where the leader line leaves the label: on the line from the label's centre
+ * to the dot, just outside the box. Aiming at the centre (rather than the
+ * box's nearest point) keeps the line pointing at the word even when the
+ * label sits diagonally from its dot, where the nearest point is a corner.
+ */
+function leaderStart(box, p) {
   var gap = 8
-  return {
-    x: Math.max(box.left - gap, Math.min(p.x, box.left + box.width + gap)),
-    y: Math.max(box.top - gap, Math.min(p.y, box.top + box.height + gap)),
-  }
+  var cx = box.left + box.width / 2
+  var cy = box.top + box.height / 2
+  var dx = p.x - cx
+  var dy = p.y - cy
+  var t = Math.min(
+    dx === 0 ? Infinity : (box.width / 2 + gap) / Math.abs(dx),
+    dy === 0 ? Infinity : (box.height / 2 + gap) / Math.abs(dy),
+  )
+  // The dot is inside the box: no line to draw.
+  if (t >= 1) return { x: p.x, y: p.y }
+  return { x: cx + dx * t, y: cy + dy * t }
 }
 
 function svgEl(doc, name, attrs) {
@@ -120,7 +132,7 @@ function buildCallout(doc, spot, p) {
   var layout = LABELS[spot.tag] || { x: p.x + 40, y: p.y + 14, anchor: 'start' }
   var lines = layout.lines || [spot.label]
   var box = labelBox(layout, lines)
-  var from = nearestEdge(box, p)
+  var from = leaderStart(box, p)
 
   var g = svgEl(doc, 'g', { class: 'pm-bodymap-callout', 'data-tag': spot.tag })
   // Wide invisible copies of the line and the label's box are the tap targets.
