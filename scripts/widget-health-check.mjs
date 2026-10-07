@@ -76,7 +76,14 @@ async function postTrack(body) {
 
 // --- 1. Static asset reachable -------------------------------------------
 await check('widget.js is served and looks like the real bundle', async () => {
-  const res = await fetch(WIDGET_JS_URL)
+  // A unique query string gives this request its own cache entry at the CDN.
+  // This check runs on every merge to main at the same moment as the widget
+  // deploy, so fetching the plain URL could reach Cloudflare before the new
+  // build is published and cache the old one under the URL every customer
+  // site loads -- on 2026-10-07 that held a release back for ten minutes.
+  const url = new URL(WIDGET_JS_URL)
+  url.searchParams.set('health-check', String(Date.now()))
+  const res = await fetch(url, { cache: 'no-store' })
   assert(res.status === 200, `expected 200, got ${res.status}`)
   const text = await res.text()
   assert(text.includes('postTracking'), 'bundle is missing postTracking() -- wrong/stale build?')
