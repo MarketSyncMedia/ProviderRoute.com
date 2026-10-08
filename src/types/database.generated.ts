@@ -897,6 +897,7 @@ export type Database = {
       }
       execute_provider_import: { Args: { p_payload: Json }; Returns: Json }
       normalize_name: { Args: { input: string }; Returns: string }
+      prune_job_health: { Args: never; Returns: Json }
       set_organization_member_role: {
         Args: { p_role: string; p_user_id: string }
         Returns: undefined
