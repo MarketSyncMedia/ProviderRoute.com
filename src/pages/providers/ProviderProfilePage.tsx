@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, Pencil, Stethoscope, Trash2, Upload, X } from 'lucide-react'
+import {
+  ArchiveRestore,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
+  Stethoscope,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import EmptyState from '../../components/ui/EmptyState'
@@ -21,7 +31,9 @@ import {
 import {
   archiveOffering,
   createOffering,
+  getArchivedOfferingsByProvider,
   getOfferingsByProvider,
+  restoreOffering,
   updateOffering,
 } from '../../lib/api/offerings'
 import { supabase } from '../../lib/supabase'
@@ -83,6 +95,8 @@ export default function ProviderProfilePage() {
   const [offeringConstraints, setOfferingConstraints] = useState<Record<string, unknown>>({})
   const [offeringError, setOfferingError] = useState('')
   const [offeringSaving, setOfferingSaving] = useState(false)
+  const [archivedOpen, setArchivedOpen] = useState(false)
+  const [restoringOfferingId, setRestoringOfferingId] = useState<string | null>(null)
 
   const { register, reset, handleSubmit, formState } = useForm<ProviderFormValues>({
     defaultValues: {
@@ -137,6 +151,14 @@ export default function ProviderProfilePage() {
   const { data: offerings = [], isLoading: offeringsLoading } = useQuery({
     queryKey: ['provider-offerings', id],
     queryFn: () => getOfferingsByProvider(id as string),
+    enabled: Boolean(id),
+  })
+
+  // Nested under the active list's key so every existing
+  // invalidateQueries(['provider-offerings', id]) also refreshes this one.
+  const { data: archivedOfferings = [] } = useQuery({
+    queryKey: ['provider-offerings', id, 'archived'],
+    queryFn: () => getArchivedOfferingsByProvider(id as string),
     enabled: Boolean(id),
   })
 
@@ -472,6 +494,18 @@ export default function ProviderProfilePage() {
     setModal({ type: null })
     toast.success(toastType === 'add-offering' ? 'Offering added' : 'Offering updated')
     setOfferingSaving(false)
+  }
+
+  async function handleRestoreOffering(offeringId: string) {
+    setRestoringOfferingId(offeringId)
+    const result = await restoreOffering(offeringId)
+    setRestoringOfferingId(null)
+    if (result.error) {
+      toast.error(result.error)
+      return
+    }
+    await queryClient.invalidateQueries({ queryKey: ['provider-offerings', id] })
+    toast.success('Offering restored')
   }
 
   if (providerLoading || categoriesLoading) {
@@ -842,6 +876,91 @@ export default function ProviderProfilePage() {
         )}
       </div>
 
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-6">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 text-left"
+          aria-expanded={archivedOpen}
+          onClick={() => setArchivedOpen((open) => !open)}
+        >
+          {archivedOpen ? (
+            <ChevronDown className="h-4 w-4 text-slate-500" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-slate-500" />
+          )}
+          <h2 className="font-semibold text-slate-900">Archived offerings</h2>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+            {archivedOfferings.length}
+          </span>
+        </button>
+
+        {archivedOpen ? (
+          archivedOfferings.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">No archived offerings</p>
+          ) : (
+            <div className="mt-4 w-full">
+              <div className="grid grid-cols-4 gap-4 border-b border-slate-200 pb-2 text-xs uppercase tracking-wider text-slate-500">
+                <div>Case Type</div>
+                <div>Locations</div>
+                <div>Constraints</div>
+                <div>Actions</div>
+              </div>
+              {archivedOfferings.map((offering, index) => {
+                const locationNames = offering.location_ids
+                  .map((locationId) => locationNameById.get(locationId))
+                  .filter((name): name is string => Boolean(name))
+                const constraintSummary = Object.entries(offering.constraints ?? {})
+                  .map(([key, value]) => `${key}: ${String(value)}`)
+                  .join(', ')
+                const displayConstraintSummary =
+                  constraintSummary.length > 40
+                    ? `${constraintSummary.slice(0, 40)}...`
+                    : constraintSummary || '—'
+
+                return (
+                  <div
+                    key={offering.id}
+                    className={[
+                      'grid grid-cols-4 items-center gap-4 py-3',
+                      index === archivedOfferings.length - 1 ? '' : 'border-b border-slate-100',
+                    ].join(' ')}
+                  >
+                    <div className="text-sm font-medium text-slate-900">
+                      {caseTypeNameById.get(offering.case_type_id) ?? 'Unknown'}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {locationNames.length === 0 ? (
+                        <span className="text-sm text-slate-500">—</span>
+                      ) : (
+                        locationNames.map((name) => (
+                          <span
+                            key={`${offering.id}-${name}`}
+                            className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
+                          >
+                            {name}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    <div className="text-sm text-slate-600">{displayConstraintSummary}</div>
+                    <div>
+                      <button
+                        type="button"
+                        disabled={restoringOfferingId !== null}
+                        className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                        onClick={() => handleRestoreOffering(offering.id)}
+                      >
+                        <ArchiveRestore className="h-4 w-4" /> Restore
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        ) : null}
+      </div>
+
       <button type="button" className="text-sm text-red-500 underline" onClick={handleArchive}>
         Archive Provider
       </button>
@@ -993,7 +1112,7 @@ export default function ProviderProfilePage() {
     <ConfirmDialog
       isOpen={modal.type === 'delete-offering'}
       title="Remove Offering"
-      message="Remove this offering? This cannot be undone."
+      message="Remove this offering? It moves to Archived offerings below, where you can restore it."
       confirmLabel="Remove"
       confirmVariant="danger"
       onConfirm={async () => {
