@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Provider, ProviderLocation } from '../../src/types/database'
@@ -36,9 +37,11 @@ vi.mock('../../src/lib/api/providerLocations', () => providerLocationsApi)
 
 const offeringsApi = vi.hoisted(() => ({
   getOfferingsByProvider: vi.fn(),
+  getArchivedOfferingsByProvider: vi.fn(),
   createOffering: vi.fn(),
   updateOffering: vi.fn(),
   archiveOffering: vi.fn(),
+  restoreOffering: vi.fn(),
 }))
 vi.mock('../../src/lib/api/offerings', () => offeringsApi)
 
@@ -116,6 +119,8 @@ describe('ProviderProfilePage render stability', () => {
     })
     providersApi.getProvider.mockResolvedValue(makeProvider())
     offeringsApi.getOfferingsByProvider.mockResolvedValue([])
+    offeringsApi.getArchivedOfferingsByProvider.mockResolvedValue([])
+    providerLocationsApi.getProviderLocations.mockResolvedValue([])
   })
 
   it('does not infinite-loop when provider-locations resolves after the other queries', async () => {
@@ -138,5 +143,67 @@ describe('ProviderProfilePage render stability', () => {
     await waitFor(() => {
       expect(screen.getByText(/Dr\. Jane Smith/)).toBeInTheDocument()
     })
+  })
+})
+
+describe('ProviderProfilePage archived offerings', () => {
+  const archivedOffering = {
+    id: 'o9',
+    provider_id: 'p1',
+    org_id: 'org1',
+    case_type_id: 'ct-unknown',
+    location_ids: [],
+    constraints: { medicare: 1 },
+    is_archived: true,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAuthStore.setState({
+      org: { id: 'org1', name: 'Test Org' } as never,
+      user: { id: 'u1', org_id: 'org1', name: 'Tester', email: 't@example.com' } as never,
+    })
+    providersApi.getProvider.mockResolvedValue(makeProvider())
+    providerLocationsApi.getProviderLocations.mockResolvedValue([])
+    offeringsApi.getOfferingsByProvider.mockResolvedValue([])
+    offeringsApi.getArchivedOfferingsByProvider.mockResolvedValue([archivedOffering])
+    offeringsApi.restoreOffering.mockResolvedValue({ error: null })
+  })
+
+  it('shows a collapsed section with the archived count, and expands to list them', async () => {
+    renderPage()
+
+    const header = await screen.findByRole('button', { name: /Archived offerings/ })
+    await waitFor(() => expect(header).toHaveTextContent('1'))
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: /restore/i })).not.toBeInTheDocument()
+
+    await userEvent.click(header)
+
+    expect(header).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('medicare: 1')).toBeInTheDocument()
+    expect(offeringsApi.getArchivedOfferingsByProvider).toHaveBeenCalledWith('p1')
+  })
+
+  it('restores an archived offering and refetches both offering lists', async () => {
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: /Archived offerings/ }))
+    offeringsApi.getArchivedOfferingsByProvider.mockResolvedValue([])
+    const activeFetchesBefore = offeringsApi.getOfferingsByProvider.mock.calls.length
+
+    await userEvent.click(await screen.findByRole('button', { name: /restore/i }))
+
+    await waitFor(() => expect(offeringsApi.restoreOffering).toHaveBeenCalledWith('o9'))
+    await waitFor(() => expect(screen.getByText('No archived offerings')).toBeInTheDocument())
+    expect(offeringsApi.getOfferingsByProvider.mock.calls.length).toBeGreaterThan(activeFetchesBefore)
+  })
+
+  it('says so when the provider has no archived offerings', async () => {
+    offeringsApi.getArchivedOfferingsByProvider.mockResolvedValue([])
+    renderPage()
+
+    await userEvent.click(await screen.findByRole('button', { name: /Archived offerings/ }))
+
+    expect(screen.getByText('No archived offerings')).toBeInTheDocument()
   })
 })

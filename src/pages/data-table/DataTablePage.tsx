@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import ImportWizard from '../../components/import/ImportWizard'
+import ArchivedOfferingsView from './ArchivedOfferingsView'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import { useToast } from '../../components/ui/toastStore'
@@ -85,6 +86,7 @@ export default function DataTablePage() {
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set())
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>(defaultVisibility)
   const [showImport, setShowImport] = useState(false)
+  const [view, setView] = useState<'active' | 'archived'>('active')
   const exactDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({})
   const columnVisibilityInitialized = useRef(false)
 
@@ -968,6 +970,37 @@ export default function DataTablePage() {
     <div>
       <p className="text-sm text-slate-500">Manage offerings and constraint values</p>
 
+      <div className="mt-2 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Offerings view">
+        {(['active', 'archived'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={view === tab}
+            onClick={() => setView(tab)}
+            className={[
+              '-mb-px border-b-2 px-3 py-1.5 text-sm',
+              view === tab
+                ? 'border-indigo-600 font-medium text-indigo-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700',
+            ].join(' ')}
+          >
+            {tab === 'active' ? 'Active' : 'Archived'}
+          </button>
+        ))}
+      </div>
+
+      {view === 'archived' ? (
+        <ArchivedOfferingsView
+          orgId={orgId}
+          caseTypes={caseTypes}
+          locations={locations}
+          constraints={constraints}
+        />
+      ) : null}
+
+      {/* Kept mounted (just hidden) so filters, sort and column choices survive a trip to the Archived tab. */}
+      <div hidden={view === 'archived'}>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -1337,11 +1370,12 @@ export default function DataTablePage() {
           Next
         </button>
       </div>
+      </div>
 
       <ConfirmDialog
         isOpen={archiveTargetId !== null}
         title="Archive Offering"
-        message="Archive this offering?"
+        message="Archive this offering? It will be hidden from the matcher and widget, and you can restore it from the Archived tab."
         confirmLabel="Archive"
         confirmVariant="danger"
         onConfirm={async () => {

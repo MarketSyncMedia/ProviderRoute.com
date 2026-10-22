@@ -30,6 +30,24 @@ export async function getDataTableOfferings(orgId: string): Promise<DataTableOff
   return rows ?? []
 }
 
+/**
+ * Archived counterpart of getDataTableOfferings, backing the data table's
+ * "Archived" view. Paged for the same reason: an import that replaces data can
+ * archive thousands of rows at once.
+ */
+export async function getArchivedDataTableOfferings(orgId: string): Promise<DataTableOffering[]> {
+  const rows = await selectAllRows<DataTableOffering>((from, to) =>
+    supabase
+      .from('offerings')
+      .select('*, providers(id, name, category_ids, image_url)')
+      .eq('org_id', orgId)
+      .eq('is_archived', true)
+      .range(from, to),
+  )
+
+  return rows ?? []
+}
+
 export async function updateOfferingLocationIds(
   offeringId: string,
   locationIds: string[]
@@ -92,6 +110,15 @@ export async function archiveOfferings(offeringIds: string[]): Promise<{ error: 
   const { error } = await supabase
     .from('offerings')
     .update({ is_archived: true })
+    .in('id', offeringIds)
+
+  return { error: error?.message ?? null }
+}
+
+export async function restoreOfferings(offeringIds: string[]): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('offerings')
+    .update({ is_archived: false })
     .in('id', offeringIds)
 
   return { error: error?.message ?? null }

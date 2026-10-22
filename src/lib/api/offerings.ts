@@ -15,6 +15,20 @@ export async function getOfferingsByProvider(providerId: string): Promise<Offeri
   return data as Offering[]
 }
 
+export async function getArchivedOfferingsByProvider(providerId: string): Promise<Offering[]> {
+  const { data, error } = await supabase
+    .from('offerings')
+    .select('*')
+    .eq('provider_id', providerId)
+    .eq('is_archived', true)
+
+  if (error || !data) {
+    return []
+  }
+
+  return data as Offering[]
+}
+
 export async function createOffering(data: {
   provider_id: string
   case_type_id: string
@@ -46,6 +60,11 @@ export async function updateOffering(
   updates: Partial<Offering>
 ): Promise<{ error: string | null }> {
   const { error } = await supabase.from('offerings').update(updates).eq('id', id)
+  return { error: error?.message ?? null }
+}
+
+export async function restoreOffering(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('offerings').update({ is_archived: false }).eq('id', id)
   return { error: error?.message ?? null }
 }
 
