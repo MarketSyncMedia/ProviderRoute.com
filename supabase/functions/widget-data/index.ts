@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.3'
 import { corsHeaders, isHostAllowed, requestHost } from '../_shared/origin.ts'
 import { clientKey, isUuid, rateLimit } from '../_shared/guard.ts'
 import { issueSessionToken } from '../_shared/session-token.ts'
+import { chunk, selectAllRows } from '../_shared/paginate.ts'
 
 // Keep in sync with the widget's fetch: it sends only Content-Type and
 // Authorization, and adding to this list has previously broken preflight.
@@ -100,72 +101,94 @@ serve(async (req) => {
       ? (snapshot.scoped_question_ids as string[])
       : null
 
-    const orgQuery = Promise.resolve(
+    const [
+      orgResult,
+      allProviders,
+      allOfferings,
+      caseTypes,
+      categories,
+      locations,
+      constraints,
+      allQuestions,
+    ] = await Promise.all([
       supabase
         .from('organizations')
         .select('fallback_phone,fallback_message,allowed_domains,default_booking_mode,default_phone_mode')
         .eq('id', orgId)
-        .single()
-    )
-
-    const results = await Promise.all([
-      orgQuery,
+        .single(),
       // This endpoint is public. Keep these projections deliberately narrow so
       // adding an admin-only column to a table can never publish it by accident.
-      supabase
-        .from('providers')
-        .select('id,name,subtitle,bio_link,image_url,category_ids,booking_mode,phone_mode')
-        .eq('org_id', orgId)
-        .eq('is_archived', false),
-      supabase
-        .from('offerings')
-        .select('id,provider_id,case_type_id,location_ids,constraints')
-        .eq('org_id', orgId)
-        .eq('is_archived', false),
-      supabase
-        .from('case_types')
-        .select('id,name,sort_order,map_tag')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name'),
-      supabase
-        .from('categories')
-        .select('id,name,sort_order')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name'),
-      supabase
-        .from('locations')
-        .select('id,name,address,directions_url,sort_order')
-        .eq('org_id', orgId)
-        .eq('is_archived', false),
-      supabase
-        .from('constraints')
-        .select('id,name,type,mapped_key,secondary_mapped_key,min_allowed_value,max_allowed_value,yes_label,no_label,yes_maps_to,no_maps_to,sort_order')
-        .eq('org_id', orgId)
-        .eq('is_archived', false),
-      supabase
-        .from('questions')
-        .select('id,question_text,subtext,question_type,input_type,constraint_id,required,order_rank,system_config')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('order_rank'),
+      // Every ordering ends on `id` so pages never overlap or skip rows.
+      selectAllRows((from, to) =>
+        supabase
+          .from('providers')
+          .select('id,name,subtitle,bio_link,image_url,category_ids,booking_mode,phone_mode')
+          .eq('org_id', orgId)
+          .eq('is_archived', false)
+          .order('id')
+          .range(from, to)
+      ),
+      selectAllRows((from, to) =>
+        supabase
+          .from('offerings')
+          .select('id,provider_id,case_type_id,location_ids,constraints')
+          .eq('org_id', orgId)
+          .eq('is_archived', false)
+          .order('id')
+          .range(from, to)
+      ),
+      selectAllRows((from, to) =>
+        supabase
+          .from('case_types')
+          .select('id,name,sort_order,map_tag')
+          .eq('org_id', orgId)
+          .eq('is_archived', false)
+          .order('name')
+          .order('id')
+          .range(from, to)
+      ),
+      selectAllRows((from, to) =>
+        supabase
+          .from('categories')
+          .select('id,name,sort_order')
+          .eq('org_id', orgId)
+          .eq('is_archived', false)
+          .order('name')
+          .order('id')
+          .range(from, to)
+      ),
+      selectAllRows((from, to) =>
+        supabase
+          .from('locations')
+          .select('id,name,address,directions_url,sort_order')
+          .eq('org_id', orgId)
+          .eq('is_archived', false)
+          .order('id')
+          .range(from, to)
+      ),
+      selectAllRows((from, to) =>
+        supabase
+          .from('constraints')
+          .select('id,name,type,mapped_key,secondary_mapped_key,min_allowed_value,max_allowed_value,yes_label,no_label,yes_maps_to,no_maps_to,sort_order')
+          .eq('org_id', orgId)
+          .eq('is_archived', false)
+          .order('id')
+          .range(from, to)
+      ),
+      selectAllRows((from, to) =>
+        supabase
+          .from('questions')
+          .select('id,question_text,subtext,question_type,input_type,constraint_id,required,order_rank,system_config')
+          .eq('org_id', orgId)
+          .eq('is_archived', false)
+          .order('order_rank')
+          .order('id')
+          .range(from, to)
+      ),
     ])
 
-    for (const result of results) {
-      if (result.error) throw new Error(result.error.message)
-    }
-
-    const [
-      { data: org },
-      { data: allProviders },
-      { data: allOfferings },
-      { data: caseTypes },
-      { data: categories },
-      { data: locations },
-      { data: constraints },
-      { data: allQuestions },
-    ] = results
+    if (orgResult.error) throw new Error(orgResult.error.message)
+    const org = orgResult.data
 
     // Enforce the org's domain list here, not just in the widget. The
     // client-side check in widget.js runs after the payload has already been
@@ -189,27 +212,27 @@ serve(async (req) => {
     }
 
     const providers = (scopedProviderIds
-      ? (allProviders ?? []).filter((p) => scopedProviderIds.includes(p.id))
-      : (allProviders ?? [])).map((provider) => ({
+      ? allProviders.filter((p) => scopedProviderIds.includes(p.id))
+      : allProviders).map((provider) => ({
         ...provider,
         bio_link: safeHttpsUrl(provider.bio_link),
         image_url: safeHttpsUrl(provider.image_url),
       }))
     const filteredCaseTypes = scopedCaseTypeIds
-      ? (caseTypes ?? []).filter((ct) => scopedCaseTypeIds.includes(ct.id))
-      : (caseTypes ?? [])
+      ? caseTypes.filter((ct) => scopedCaseTypeIds.includes(ct.id))
+      : caseTypes
     const filteredLocations = scopedLocationIds
-      ? (locations ?? []).filter((l) => scopedLocationIds.includes(l.id))
-      : (locations ?? [])
+      ? locations.filter((l) => scopedLocationIds.includes(l.id))
+      : locations
     const providerIds = providers.map((p) => p.id)
     const caseTypeIds = filteredCaseTypes.map((ct) => ct.id)
-    const offerings = (allOfferings ?? []).filter(
+    const offerings = allOfferings.filter(
       (o) => providerIds.includes(o.provider_id) && caseTypeIds.includes(o.case_type_id),
     )
 
     let questions = scopedQuestionIds
-      ? (allQuestions ?? []).filter((q) => scopedQuestionIds.includes(q.id))
-      : (allQuestions ?? [])
+      ? allQuestions.filter((q) => scopedQuestionIds.includes(q.id))
+      : allQuestions
 
     if (questionOrder.length > 0) {
       const ordered: typeof questions = []
@@ -226,13 +249,22 @@ serve(async (req) => {
 
     let providerLocations: Record<string, unknown>[] = []
     if (providerIds.length > 0 && filteredLocations.length > 0) {
-      const providerLocationsResult = await supabase
-        .from('provider_locations')
-        .select('provider_id,location_id,booking_link,phone,bio_link')
-        .in('provider_id', providerIds)
-        .in('location_id', filteredLocations.map((location) => location.id))
-      if (providerLocationsResult.error) throw new Error(providerLocationsResult.error.message)
-      providerLocations = (providerLocationsResult.data ?? []).map((providerLocation) => ({
+      // provider_locations has no org_id, so it is read by provider id. The id
+      // list grows with the org, so it is chunked to keep each request URL
+      // bounded, and the location scope is applied here rather than as a
+      // second `.in()` on the URL.
+      const locationIds = new Set(filteredLocations.map((location) => location.id))
+      const chunks = await Promise.all(chunk(providerIds).map((ids) =>
+        selectAllRows((from, to) =>
+          supabase
+            .from('provider_locations')
+            .select('provider_id,location_id,booking_link,phone,bio_link')
+            .in('provider_id', ids)
+            .order('id')
+            .range(from, to)
+        )
+      ))
+      providerLocations = chunks.flat().filter((pl) => locationIds.has(pl.location_id)).map((providerLocation) => ({
         ...providerLocation,
         booking_link: safeHttpsUrl(providerLocation.booking_link),
         bio_link: safeHttpsUrl(providerLocation.bio_link),
@@ -270,12 +302,12 @@ serve(async (req) => {
         providers,
         offerings,
         caseTypes: filteredCaseTypes,
-        categories: categories ?? [],
+        categories,
         locations: filteredLocations.map((location) => ({
           ...location,
           directions_url: safeHttpsUrl(location.directions_url),
         })),
-        constraints: constraints ?? [],
+        constraints,
         questions,
         providerLocations,
       }),
