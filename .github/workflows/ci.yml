@@ -54,6 +54,10 @@ jobs:
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      # Read-only, for the registry login below.
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -67,6 +71,15 @@ jobs:
       - uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
         with:
           version: 2.109.0
+
+      # The Supabase images come from ghcr.io, which throttles anonymous pulls
+      # from shared runners. Logging in helps but does not remove the limit;
+      # scripts/verify-database.mjs waits out the rest.
+      - name: Log in to GitHub's container registry
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
       - name: Rebuild and verify disposable database
         run: npm run verify:db -- --allow-reset

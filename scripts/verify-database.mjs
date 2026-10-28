@@ -26,6 +26,34 @@ function run(label, command, args, options = {}) {
   return result.stdout ?? ''
 }
 
+const sleepSeconds = (seconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000)
+
+/**
+ * Starting the stack pulls about a gigabyte of images from ghcr.io, which
+ * throttles shared CI runners per minute ("toomanyrequests ... allowed:
+ * 44000/minute"). The CLI's own retries give up within seconds, so a busy
+ * minute failed the whole check with nothing wrong in the repo. Wait out the
+ * window and try again, but only for that error: anything else fails at once.
+ */
+function startStack(args) {
+  const waits = [60, 120]
+  for (let attempt = 0; ; attempt += 1) {
+    console.log(`\n=== Start disposable Supabase${attempt ? ` (retry ${attempt})` : ''} ===`)
+    const result = spawnSync(supabase, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    process.stdout.write(result.stdout ?? '')
+    process.stderr.write(result.stderr ?? '')
+    if (result.error) throw new Error(`Start disposable Supabase could not start: ${result.error.message}`)
+    if (result.status === 0) return
+    const rateLimited = /toomanyrequests/i.test(`${result.stdout}\n${result.stderr}`)
+    if (!rateLimited || attempt >= waits.length) {
+      throw new Error(`Start disposable Supabase failed with exit code ${result.status ?? 'unknown'}`)
+    }
+    console.log(`Image registry rate limit hit; waiting ${waits[attempt]}s before retrying.`)
+    spawnSync(supabase, ['stop', '--no-backup'], { cwd: root, stdio: 'inherit' })
+    sleepSeconds(waits[attempt])
+  }
+}
+
 function parseEnv(output) {
   const values = {}
   for (const line of output.split(/\r?\n/)) {
@@ -36,9 +64,7 @@ function parseEnv(output) {
 }
 
 try {
-  run('Start disposable Supabase', supabase, [
-    'start', '-x', 'studio,imgproxy,inbucket,edge-runtime,analytics,vector,functions,realtime',
-  ])
+  startStack(['start', '-x', 'studio,imgproxy,inbucket,edge-runtime,analytics,vector,functions,realtime'])
   stackStarted = true
   run('Rebuild database from migrations', supabase, ['db', 'reset', '--local'])
   run('Database lint', supabase, ['db', 'lint', '--local', '--level', 'error'])
