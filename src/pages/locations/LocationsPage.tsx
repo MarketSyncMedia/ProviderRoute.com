@@ -232,7 +232,7 @@ export default function LocationsPage() {
                   <td className="px-4 py-3 font-medium text-slate-900">{location.name}</td>
                   {/* truncate needs a width on a block; on the cell itself it never caps the column */}
                   <td className="px-4 py-3 text-sm text-slate-500" title={location.address ?? ''}>
-                    <div className="max-w-xs truncate">{location.address ?? '—'}</div>
+                    <div className="max-w-[14rem] truncate xl:max-w-xs">{location.address ?? '—'}</div>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">{location.phone ?? '—'}</td>
                   <td className="px-4 py-3">
