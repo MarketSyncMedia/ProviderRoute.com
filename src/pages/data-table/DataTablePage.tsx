@@ -13,6 +13,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import ImportWizard from '../../components/import/ImportWizard'
+import OfferingModal from '../../components/modals/OfferingModal'
+import { emptyOfferingDraft, type OfferingDraft } from '../../components/modals/offeringDraft'
 import ArchivedOfferingsView from './ArchivedOfferingsView'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
@@ -26,6 +28,8 @@ import {
   updateOfferingLocationIds,
   updateProviderCategories,
 } from '../../lib/api/dataTable'
+import { createOffering } from '../../lib/api/offerings'
+import { getProviders } from '../../lib/api/providers'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../stores/authStore'
 import type { CaseType, Category, Constraint, Location } from '../../types/database'
@@ -86,6 +90,9 @@ export default function DataTablePage() {
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set())
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>(defaultVisibility)
   const [showImport, setShowImport] = useState(false)
+  const [addOfferingOpen, setAddOfferingOpen] = useState(false)
+  const [addOfferingSaving, setAddOfferingSaving] = useState(false)
+  const [addOfferingError, setAddOfferingError] = useState('')
   const [view, setView] = useState<'active' | 'archived'>('active')
   const exactDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({})
   const columnVisibilityInitialized = useRef(false)
@@ -164,6 +171,41 @@ export default function DataTablePage() {
     },
     enabled: Boolean(orgId),
   })
+
+  // Only needed by the add dialog, so it is not fetched until that opens.
+  const { data: providers = [] } = useQuery({
+    queryKey: ['providers', orgId],
+    queryFn: () => getProviders(orgId),
+    enabled: Boolean(orgId) && addOfferingOpen,
+  })
+
+  function openAddOffering() {
+    setAddOfferingError('')
+    setAddOfferingOpen(true)
+  }
+
+  async function handleAddOffering(draft: OfferingDraft) {
+    setAddOfferingSaving(true)
+    setAddOfferingError('')
+    const result = await createOffering({
+      provider_id: draft.providerId,
+      case_type_id: draft.caseTypeId,
+      org_id: orgId,
+      location_ids: draft.locationIds,
+      constraints: draft.constraints,
+    })
+    setAddOfferingSaving(false)
+    if (result.error) {
+      setAddOfferingError(result.error)
+      return
+    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: offeringsQueryKey }),
+      queryClient.invalidateQueries({ queryKey: ['provider-offerings', draft.providerId] }),
+    ])
+    setAddOfferingOpen(false)
+    toast.success('Offering added')
+  }
 
   // Load compact mode from localStorage once on mount
   useEffect(() => {
@@ -1050,10 +1092,10 @@ export default function DataTablePage() {
         <button
           type="button"
           className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white"
-          onClick={() => alert('Add flow coming soon')}
+          onClick={openAddOffering}
         >
           <span className="inline-flex items-center gap-1">
-            <Plus className="h-4 w-4" /> + Add
+            <Plus className="h-4 w-4" /> Add
           </span>
         </button>
         <button
@@ -1435,6 +1477,21 @@ export default function DataTablePage() {
         }}
         orgId={orgId}
       />
+
+      {addOfferingOpen ? (
+        <OfferingModal
+          title="Add Offering"
+          providers={providers}
+          caseTypes={caseTypes}
+          locations={locations}
+          constraints={constraints}
+          initial={emptyOfferingDraft()}
+          saving={addOfferingSaving}
+          error={addOfferingError}
+          onCancel={() => setAddOfferingOpen(false)}
+          onSave={(draft) => void handleAddOffering(draft)}
+        />
+      ) : null}
     </div>
   )
 }

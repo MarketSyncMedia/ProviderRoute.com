@@ -156,7 +156,7 @@ export default function ConstraintsPage() {
           onClick={() => setModal({ type: 'add' })}
         >
           <Plus className="h-4 w-4" />
-          + Add Constraint
+          Add Constraint
         </button>
       </div>
 

@@ -13,6 +13,8 @@ import {
   X,
 } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import OfferingModal from '../../components/modals/OfferingModal'
+import { emptyOfferingDraft, type OfferingDraft } from '../../components/modals/offeringDraft'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
@@ -87,12 +89,10 @@ export default function ProviderProfilePage() {
   const [bookingLinks, setBookingLinks] = useState<Record<string, string>>({})
   const [phoneLinks, setPhoneLinks] = useState<Record<string, string>>({})
   const [modal, setModal] = useState<{
-    type: 'add-offering' | 'edit-offering' | 'delete-offering' | null
+    type: 'add-offering' | 'edit-offering' | 'delete-offering' | 'archive-provider' | null
     payload?: Offering
   }>({ type: null })
-  const [offeringCaseTypeId, setOfferingCaseTypeId] = useState('')
-  const [offeringDraftLocationIds, setOfferingDraftLocationIds] = useState<string[]>([])
-  const [offeringConstraints, setOfferingConstraints] = useState<Record<string, unknown>>({})
+  const [offeringInitial, setOfferingInitial] = useState<OfferingDraft>(() => emptyOfferingDraft())
   const [offeringError, setOfferingError] = useState('')
   const [offeringSaving, setOfferingSaving] = useState(false)
   const [archivedOpen, setArchivedOpen] = useState(false)
@@ -254,17 +254,19 @@ export default function ProviderProfilePage() {
   // Seed the offering form as the dialog is opened rather than in an effect
   // reacting to `modal`; these are the only paths that reach it.
   function openAddOffering() {
-    setOfferingCaseTypeId('')
-    setOfferingDraftLocationIds([])
-    setOfferingConstraints({})
+    setOfferingInitial(emptyOfferingDraft(id))
     setOfferingError('')
     setModal({ type: 'add-offering' })
   }
 
   function openEditOffering(target: Offering) {
-    setOfferingCaseTypeId(target.case_type_id ?? '')
-    setOfferingDraftLocationIds(target.location_ids ?? [])
-    setOfferingConstraints(asRecord(target.constraints))
+    setOfferingInitial({
+      providerId: target.provider_id,
+      caseTypeId: target.case_type_id ?? '',
+      locationIds: target.location_ids ?? [],
+      constraints: asRecord(target.constraints),
+    })
+    setOfferingError('')
     setModal({ type: 'edit-offering', payload: target })
   }
 
@@ -438,12 +440,11 @@ export default function ProviderProfilePage() {
 
   async function handleArchive() {
     if (!id) return
-    const confirmed = window.confirm('Archive this provider? They will be hidden from all widgets.')
-    if (!confirmed) return
 
     const result = await archiveProvider(id)
     if (result.error) {
       toast.error(result.error)
+      setModal({ type: null })
       return
     }
 
@@ -451,12 +452,8 @@ export default function ProviderProfilePage() {
     navigate('/providers')
   }
 
-  async function handleSaveOffering() {
+  async function handleSaveOffering(draft: OfferingDraft) {
     if (!id) return
-    if (!offeringCaseTypeId) {
-      setOfferingError('Case type is required')
-      return
-    }
 
     setOfferingSaving(true)
     setOfferingError('')
@@ -464,10 +461,10 @@ export default function ProviderProfilePage() {
     if (modal.type === 'add-offering') {
       const result = await createOffering({
         provider_id: id,
-        case_type_id: offeringCaseTypeId,
+        case_type_id: draft.caseTypeId,
         org_id: orgId,
-        location_ids: offeringDraftLocationIds,
-        constraints: offeringConstraints,
+        location_ids: draft.locationIds,
+        constraints: draft.constraints,
       })
       if (result.error) {
         setOfferingError(result.error)
@@ -478,9 +475,9 @@ export default function ProviderProfilePage() {
 
     if (modal.type === 'edit-offering' && modal.payload?.id) {
       const result = await updateOffering(modal.payload.id, {
-        case_type_id: offeringCaseTypeId,
-        location_ids: offeringDraftLocationIds,
-        constraints: toJson(offeringConstraints),
+        case_type_id: draft.caseTypeId,
+        location_ids: draft.locationIds,
+        constraints: toJson(draft.constraints),
       })
       if (result.error) {
         setOfferingError(result.error)
@@ -961,154 +958,27 @@ export default function ProviderProfilePage() {
         ) : null}
       </div>
 
-      <button type="button" className="text-sm text-red-500 underline" onClick={handleArchive}>
+      <button
+        type="button"
+        className="text-sm text-red-500 underline"
+        onClick={() => setModal({ type: 'archive-provider' })}
+      >
         Archive Provider
       </button>
     </div>
-    {(modal.type === 'add-offering' || modal.type === 'edit-offering') && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="absolute inset-0" onMouseDown={() => setModal({ type: null })} />
-        <div
-          className="relative mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <h2 className="mb-4 text-lg font-semibold text-slate-900">
-            {modal.type === 'add-offering' ? 'Add Offering' : 'Edit Offering'}
-          </h2>
-
-          {offeringError ? (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {offeringError}
-            </div>
-          ) : null}
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Case Type</label>
-            <select
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              value={offeringCaseTypeId}
-              onChange={(e) => setOfferingCaseTypeId(e.target.value)}
-            >
-              <option value="">Select case type...</option>
-              {orgCaseTypes.map((caseType) => (
-                <option key={caseType.id} value={caseType.id}>
-                  {caseType.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-2 block text-sm font-medium text-slate-700">Locations</label>
-            <div className="space-y-2">
-              {orgLocations.map((location) => (
-                <label key={location.id} className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={offeringDraftLocationIds.includes(location.id)}
-                    onChange={(e) => {
-                      setOfferingDraftLocationIds((prev) =>
-                        e.target.checked
-                          ? [...prev, location.id]
-                          : prev.filter((existingId) => existingId !== location.id)
-                      )
-                    }}
-                  />
-                  {location.name}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {orgConstraints.length > 0 ? (
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-medium text-slate-700">Constraints</label>
-              <div className="space-y-3">
-                {orgConstraints.map((constraint) => (
-                  <div key={constraint.id}>
-                    <p className="mb-1 text-sm text-slate-700">{constraint.name}</p>
-                    {constraint.type === 'binary' ? (
-                      <label className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={offeringConstraints[constraint.mapped_key] === 1}
-                          onChange={(e) =>
-                            setOfferingConstraints((prev) => ({
-                              ...prev,
-                              [constraint.mapped_key]: e.target.checked ? 1 : 0,
-                            }))
-                          }
-                        />
-                        Enabled
-                      </label>
-                    ) : null}
-                    {constraint.type === 'range' ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="number"
-                          placeholder="Min"
-                          value={String(offeringConstraints[constraint.mapped_key] ?? '')}
-                          onChange={(e) =>
-                            setOfferingConstraints((prev) => ({
-                              ...prev,
-                              [constraint.mapped_key]: e.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Max"
-                          value={String(offeringConstraints[constraint.secondary_mapped_key ?? ''] ?? '')}
-                          onChange={(e) =>
-                            setOfferingConstraints((prev) => ({
-                              ...prev,
-                              [constraint.secondary_mapped_key ?? '']: e.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                    ) : null}
-                    {constraint.type === 'exact' ? (
-                      <input
-                        type="text"
-                        value={String(offeringConstraints[constraint.mapped_key] ?? '')}
-                        onChange={(e) =>
-                          setOfferingConstraints((prev) => ({
-                            ...prev,
-                            [constraint.mapped_key]: e.target.value,
-                          }))
-                        }
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      />
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              type="button"
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700"
-              onClick={() => setModal({ type: null })}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              disabled={offeringSaving}
-              onClick={handleSaveOffering}
-            >
-              {offeringSaving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
+    {modal.type === 'add-offering' || modal.type === 'edit-offering' ? (
+      <OfferingModal
+        title={modal.type === 'add-offering' ? 'Add Offering' : 'Edit Offering'}
+        caseTypes={orgCaseTypes}
+        locations={orgLocations}
+        constraints={orgConstraints}
+        initial={offeringInitial}
+        saving={offeringSaving}
+        error={offeringError}
+        onCancel={() => setModal({ type: null })}
+        onSave={(draft) => void handleSaveOffering(draft)}
+      />
+    ) : null}
     <ConfirmDialog
       isOpen={modal.type === 'delete-offering'}
       title="Remove Offering"
@@ -1123,6 +993,15 @@ export default function ProviderProfilePage() {
         }
         setModal({ type: null })
       }}
+      onCancel={() => setModal({ type: null })}
+    />
+    <ConfirmDialog
+      isOpen={modal.type === 'archive-provider'}
+      title="Archive Provider"
+      message="Archive this provider? They will be hidden from all widgets."
+      confirmLabel="Archive"
+      confirmVariant="danger"
+      onConfirm={handleArchive}
       onCancel={() => setModal({ type: null })}
     />
     </>

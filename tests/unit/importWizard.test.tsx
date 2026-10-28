@@ -135,3 +135,15 @@ describe('ImportWizard conflict handling', () => {
     expect(passed.resolvedConflicts['0']).toBe('merge')
   })
 })
+
+describe('ImportWizard closing', () => {
+  it('closes on Escape, like clicking the backdrop', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    render(<ImportWizard isOpen onClose={onClose} onComplete={vi.fn()} orgId="org1" />)
+    await waitFor(() => expect(orgApi.getProviders).toHaveBeenCalled())
+
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})

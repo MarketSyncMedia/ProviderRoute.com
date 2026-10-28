@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Globe } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useNavigationIntent } from '../../hooks/useNavigationIntent'
 import { createWidget, getWidgets } from '../../lib/api/widgets'
 import { approvedHttpsUrl } from '../../lib/approvedUrl'
 import { useAuthStore } from '../../stores/authStore'
@@ -23,7 +24,10 @@ export default function WidgetsPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  const [modal, setModal] = useState<{ type: 'create' | 'embed' | null; payload?: Widget }>({ type: null })
+  const openCreateOnArrival = useNavigationIntent('create-widget')
+  const [modal, setModal] = useState<{ type: 'create' | 'embed' | null; payload?: Widget }>(() => ({
+    type: openCreateOnArrival ? 'create' : null,
+  }))
   const [createName, setCreateName] = useState('')
   const [createError, setCreateError] = useState('')
   const [createLoading, setCreateLoading] = useState(false)
