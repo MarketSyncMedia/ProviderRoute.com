@@ -77,11 +77,15 @@ function mirrorRateLimitedImage(stderr) {
   const [, awsImage, nameAndTag] = match
   const ghcrImage = 'ghcr.io/supabase/' + nameAndTag
   console.log(awsImage + ' is rate-limited; pulling ' + ghcrImage + ' instead.')
-  for (const args of [['pull', ghcrImage], ['tag', ghcrImage, awsImage]]) {
-    const step = spawnSync('docker', args, { stdio: 'inherit' })
-    if (step.status !== 0) return false
+  // ghcr.io throttles shared runners per minute too, so wait that out.
+  const waits = [60, 120]
+  for (let attempt = 0; ; attempt += 1) {
+    if (spawnSync('docker', ['pull', ghcrImage], { stdio: 'inherit' }).status === 0) break
+    if (attempt >= waits.length) return false
+    console.log('Pull failed; waiting ' + waits[attempt] + 's before retrying.')
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waits[attempt] * 1000)
   }
-  return true
+  return spawnSync('docker', ['tag', ghcrImage, awsImage], { stdio: 'inherit' }).status === 0
 }
 
 let result = genTypes()

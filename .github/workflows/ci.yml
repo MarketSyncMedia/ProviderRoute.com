@@ -72,9 +72,9 @@ jobs:
         with:
           version: 2.109.0
 
-      # The Supabase images come from ghcr.io. Anonymous pulls there are
-      # rate-limited per runner IP, and shared runners hit that limit;
-      # authenticated pulls get a much higher limit.
+      # The Supabase images come from ghcr.io, which throttles anonymous pulls
+      # from shared runners. Logging in helps but does not remove the limit;
+      # scripts/verify-database.mjs waits out the rest.
       - name: Log in to GitHub's container registry
         env:
           GHCR_USER: ${{ github.actor }}
