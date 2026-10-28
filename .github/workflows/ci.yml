@@ -53,7 +53,7 @@ jobs:
 
   database:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
       # Read-only, for the registry login below.
@@ -74,12 +74,42 @@ jobs:
 
       # The Supabase images come from ghcr.io, which throttles anonymous pulls
       # from shared runners. Logging in helps but does not remove the limit;
-      # scripts/verify-database.mjs waits out the rest.
+      # scripts/verify-database.mjs falls back to other registries.
       - name: Log in to GitHub's container registry
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
+      # Every registry rate-limits shared runners, so keep the ~1 GB of
+      # Supabase images in the Actions cache and only pull when the versions
+      # change. The key follows what decides those versions: the CLI version
+      # above and the service versions pinned in supabase/.temp.
+      - name: Restore cached Supabase images
+        id: supabase-images
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/supabase-images.tar
+          key: supabase-images-cli-2.109.0-${{ hashFiles('supabase/.temp/*-version', 'supabase/config.toml') }}
+
+      - name: Load cached Supabase images
+        if: steps.supabase-images.outputs.cache-hit == 'true'
+        run: docker load -i "$RUNNER_TEMP/supabase-images.tar"
+
       - name: Rebuild and verify disposable database
+        id: verify-db
         run: npm run verify:db -- --allow-reset
+
+      # Only after a full run, so the cache never holds a partial image set.
+      - name: Export Supabase images for the cache
+        if: steps.supabase-images.outputs.cache-hit != 'true' && steps.verify-db.outcome == 'success'
+        run: |
+          images=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E 'supabase|postgrest|kong|mailpit' | grep -v '<none>')
+          docker save $images -o "$RUNNER_TEMP/supabase-images.tar"
+
+      - name: Save Supabase images to the cache
+        if: steps.supabase-images.outputs.cache-hit != 'true' && steps.verify-db.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/supabase-images.tar
+          key: ${{ steps.supabase-images.outputs.cache-primary-key }}
