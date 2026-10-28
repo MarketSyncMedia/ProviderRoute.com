@@ -53,11 +53,45 @@ function normalize(text) {
   return kept.join('\n').trimEnd()
 }
 
-const result = spawnSync(supabase, ['gen', 'types', 'typescript', '--local'], {
-  cwd: root,
-  encoding: 'utf8',
-  maxBuffer: 32 * 1024 * 1024,
-})
+const genTypes = () =>
+  spawnSync(supabase, ['gen', 'types', 'typescript', '--local'], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  })
+
+/**
+ * `gen types` runs postgres-meta in a container and, unlike `supabase start`,
+ * ignores SUPABASE_INTERNAL_IMAGE_REGISTRY: it always pulls from AWS's public
+ * registry. That caps anonymous downloads, and shared CI runners hit the cap
+ * ("toomanyrequests: Data limit exceeded"), failing the check with nothing
+ * wrong in the schema. Supabase publishes the same images to ghcr.io, so on
+ * that error pull the exact image the CLI asked for from there, give it the
+ * name the CLI looks for, and let the caller retry. The image name comes from
+ * the error rather than being pinned here, so a CLI upgrade needs no edit.
+ */
+function mirrorRateLimitedImage(stderr) {
+  if (!/toomanyrequests/i.test(stderr)) return false
+  const match = /Unable to find image '(public\.ecr\.aws\/supabase\/([^']+))' locally/.exec(stderr)
+  if (!match) return false
+  const [, awsImage, nameAndTag] = match
+  const ghcrImage = 'ghcr.io/supabase/' + nameAndTag
+  console.log(awsImage + ' is rate-limited; pulling ' + ghcrImage + ' instead.')
+  // ghcr.io throttles shared runners per minute too, so wait that out.
+  const waits = [60, 120]
+  for (let attempt = 0; ; attempt += 1) {
+    if (spawnSync('docker', ['pull', ghcrImage], { stdio: 'inherit' }).status === 0) break
+    if (attempt >= waits.length) return false
+    console.log('Pull failed; waiting ' + waits[attempt] + 's before retrying.')
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waits[attempt] * 1000)
+  }
+  return spawnSync('docker', ['tag', ghcrImage, awsImage], { stdio: 'inherit' }).status === 0
+}
+
+let result = genTypes()
+if (result.status !== 0 && mirrorRateLimitedImage(result.stderr ?? '')) {
+  result = genTypes()
+}
 
 if (result.error) {
   console.error('Could not run supabase gen types: ' + result.error.message)
