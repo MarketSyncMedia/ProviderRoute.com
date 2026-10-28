@@ -161,6 +161,21 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     }
   }, [isOpen])
 
+  // Escape closes like the backdrop does, but never mid-import: a stray key
+  // press should not hide an import that is still writing.
+  useEffect(() => {
+    if (!isOpen || inlineModal.type !== null || isImporting) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isOpen, inlineModal.type, isImporting, onClose])
+
   useEffect(() => {
     if (!isOpen || !orgId) {
       return

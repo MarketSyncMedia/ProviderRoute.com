@@ -1289,7 +1289,7 @@ export default function WidgetBuilderPage() {
           {embedMode === 'floating' ? (
             <div className="relative m-4 min-h-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="min-h-[180px] bg-slate-50 p-4">
-                <p className="text-sm text-slate-500">Configure your widget to see a preview</p>
+                <p className="text-sm text-slate-500">How the button will look on your site</p>
                 {config.open_delay_enabled ?? widget.open_delay_enabled ? (
                   <p className="mt-1 text-xs text-slate-400">
                     Hover the button below — on the live site it won&apos;t appear for{' '}
@@ -1309,10 +1309,11 @@ export default function WidgetBuilderPage() {
                   '.pmp-anim-bounce:hover{animation:pmp-bounce 0.6s ease-in-out;}',
                 ].join('\n')}</style>
               ) : null}
-              <button
-                type="button"
+              {/* A picture of the launcher, not a control: a <button> here looked clickable and did nothing. */}
+              <div
+                aria-hidden
                 className={[
-                  'absolute bottom-4 right-4 flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium shadow-lg',
+                  'absolute bottom-4 right-4 flex cursor-default items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium shadow-lg',
                   buttonAnimation !== 'none' ? `pmp-anim-${buttonAnimation}` : '',
                 ].join(' ')}
                 style={{ backgroundColor: primaryColor, color: brandTextColor }}
@@ -1331,7 +1332,7 @@ export default function WidgetBuilderPage() {
                     <span className="text-[11px] font-medium">{buttonSubtext}</span>
                   ) : null}
                 </span>
-              </button>
+              </div>
             </div>
           ) : (
             <div className="m-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -1341,11 +1342,17 @@ export default function WidgetBuilderPage() {
               >
                 {greeting}
               </div>
-              <div className="p-4 text-sm text-slate-600">Configure your widget to see a preview</div>
+              <div className="p-4 text-sm text-slate-600">How the header will look on your site</div>
             </div>
           )}
 
-          <p className="mx-4 mb-4 text-xs text-slate-500">Interactive preview available after configuring appearance</p>
+          <p className="mx-4 mb-4 text-xs text-slate-500">
+            To try the question flow with your real data, use{' '}
+            <Link to="/questions" className="font-medium text-indigo-600 hover:text-indigo-700">
+              Test Logic on the Questions page
+            </Link>
+            .
+          </p>
         </aside>
       </div>
 

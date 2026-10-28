@@ -4,6 +4,7 @@ import { Globe, MapPin, Plus, Stethoscope, Upload, Users } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import ImportWizard from '../../components/import/ImportWizard'
 import { useToast } from '../../components/ui/toastStore'
+import { intentState } from '../../hooks/useNavigationIntent'
 import { getWidgets } from '../../lib/api/widgets'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../stores/authStore'
@@ -136,7 +137,7 @@ export default function DashboardPage() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/providers')}
+                onClick={() => navigate('/providers', { state: intentState('add-provider') })}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
               >
                 <Plus className="h-4 w-4" aria-hidden />
@@ -144,7 +145,7 @@ export default function DashboardPage() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/widgets')}
+                onClick={() => navigate('/widgets', { state: intentState('create-widget') })}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
               >
                 <Globe className="h-4 w-4" aria-hidden />

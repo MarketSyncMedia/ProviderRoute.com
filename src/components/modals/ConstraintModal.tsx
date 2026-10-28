@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { X } from 'lucide-react'
 import type { Constraint } from '../../types/database'
 
 export type ConstraintFormSavePayload = Omit<Constraint, 'id' | 'created_at' | 'updated_at'>
@@ -250,7 +251,17 @@ export default function ConstraintModal({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="border-b border-slate-100 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {pill(1, 'Basic Info')}
             {pill(2, 'Configuration')}
@@ -326,7 +337,14 @@ export default function ConstraintModal({
                   ))}
                 </div>
               </div>
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
                 <button
                   type="button"
                   disabled={!formData.name.trim() || !type}

@@ -193,7 +193,7 @@ export default function LocationsPage() {
           onClick={openAdd}
         >
           <Plus className="h-4 w-4" />
-          + Add Location
+          Add Location
         </button>
       </div>
 
@@ -215,7 +215,7 @@ export default function LocationsPage() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
               <tr>
@@ -230,16 +230,17 @@ export default function LocationsPage() {
               {rows.filter((row) => row.location != null).map(({ location, offeringCount }) => (
                 <tr key={location.id} className="hover:bg-slate-50/80">
                   <td className="px-4 py-3 font-medium text-slate-900">{location.name}</td>
-                  <td className="max-w-xs truncate px-4 py-3 text-sm text-slate-500" title={location.address ?? ''}>
-                    {location.address ?? '—'}
+                  {/* truncate needs a width on a block; on the cell itself it never caps the column */}
+                  <td className="px-4 py-3 text-sm text-slate-500" title={location.address ?? ''}>
+                    <div className="max-w-[14rem] truncate xl:max-w-xs">{location.address ?? '—'}</div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-slate-500">{location.phone ?? '—'}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">{location.phone ?? '—'}</td>
                   <td className="px-4 py-3">
                     <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
                       {offeringCount}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"

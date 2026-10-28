@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Search, Upload, Users } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useNavigationIntent } from '../../hooks/useNavigationIntent'
 import ImportWizard from '../../components/import/ImportWizard'
 import EmptyState from '../../components/ui/EmptyState'
 import { useToast } from '../../components/ui/toastStore'
@@ -26,7 +27,8 @@ export default function ProvidersPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
-  const [modal, setModal] = useState<{ type: 'add' | null }>({ type: null })
+  const openAddOnArrival = useNavigationIntent('add-provider')
+  const [modal, setModal] = useState<{ type: 'add' | null }>(() => ({ type: openAddOnArrival ? 'add' : null }))
   const [searchQuery, setSearchQuery] = useState('')
   const [addForm, setAddForm] = useState<AddProviderForm>({
     name: '',
@@ -160,7 +162,7 @@ export default function ProvidersPage() {
             onClick={() => setModal({ type: 'add' })}
           >
             <Plus className="h-4 w-4" />
-            + Add Provider
+            Add Provider
           </button>
         </div>
       </div>
