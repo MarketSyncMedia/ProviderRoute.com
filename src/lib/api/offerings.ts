@@ -1,12 +1,15 @@
 import { supabase } from '../supabase'
 import type { Offering } from '../../types/database'
 
+// Offerings of an archived case type stay as they are so restoring the case
+// type brings them back; the inner join hides them meanwhile.
 export async function getOfferingsByProvider(providerId: string): Promise<Offering[]> {
   const { data, error } = await supabase
     .from('offerings')
-    .select('*')
+    .select('*, case_types!inner()')
     .eq('provider_id', providerId)
     .eq('is_archived', false)
+    .eq('case_types.is_archived', false)
 
   if (error || !data) {
     return []
@@ -18,9 +21,10 @@ export async function getOfferingsByProvider(providerId: string): Promise<Offeri
 export async function getArchivedOfferingsByProvider(providerId: string): Promise<Offering[]> {
   const { data, error } = await supabase
     .from('offerings')
-    .select('*')
+    .select('*, case_types!inner()')
     .eq('provider_id', providerId)
     .eq('is_archived', true)
+    .eq('case_types.is_archived', false)
 
   if (error || !data) {
     return []

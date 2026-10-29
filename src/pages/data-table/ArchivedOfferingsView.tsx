@@ -4,6 +4,7 @@ import { ArchiveRestore } from 'lucide-react'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import { useToast } from '../../components/ui/toastStore'
 import { getArchivedDataTableOfferings, restoreOfferings } from '../../lib/api/dataTable'
+import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import type { CaseType, Constraint, Location } from '../../types/database'
 
 const PAGE_SIZE = 50
@@ -96,8 +97,9 @@ export default function ArchivedOfferingsView({
       toast.error(result.error)
       return
     }
-    // Prefix match refreshes both the active and archived lists.
-    await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+    // Prefix match on data-table-offerings refreshes both the active and
+    // archived lists.
+    await invalidateOfferingReaders(queryClient, orgId)
     setSelected((prev) => {
       const next = new Set(prev)
       ids.forEach((id) => next.delete(id))

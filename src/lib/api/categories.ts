@@ -108,8 +108,9 @@ export async function getCategoryOfferingCounts(
   const offerings = await selectAllRows<{ provider_id: string | null }>((from, to) =>
     supabase
       .from('offerings')
-      .select('provider_id')
+      .select('provider_id, case_types!inner()')
       .eq('is_archived', false)
+      .eq('case_types.is_archived', false)
       .in(
         'provider_id',
         providers.map((p) => p.id),
