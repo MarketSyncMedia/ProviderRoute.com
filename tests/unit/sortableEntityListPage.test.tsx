@@ -30,6 +30,7 @@ const ctApi = vi.hoisted(() => ({
   updateCaseType: vi.fn(),
   updateCaseTypeOrders: vi.fn(),
   archiveCaseType: vi.fn(),
+  getArchivedCaseTypes: vi.fn(async () => []),
 }))
 const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
 
@@ -299,7 +300,7 @@ describe('cache isolation', () => {
       </QueryClientProvider>,
     )
     await screen.findByText('Sports Medicine')
-    await screen.findByText('Knee Pain')
+    await within(await screen.findByRole('region', { name: 'case types' })).findByText('Knee Pain')
 
     const catRows = client.getQueryData<{ entity: Category }[]>(['categories-with-counts', 'org1'])
     const ctRows = client.getQueryData<{ entity: CaseType }[]>(['case-types-with-counts', 'org1'])
