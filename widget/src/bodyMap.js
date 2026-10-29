@@ -1,5 +1,5 @@
 import { BODY_MAP_SPOTS } from '../../src/shared/bodyMap'
-import { OUTLINE_PATH, OUTLINE_SIZE, VIEW_FRAMES } from './bodyOutline'
+import { OUTLINE_PATH, OUTLINE_SIZE, VIEW_FRAMES } from '../../src/shared/bodyOutline'
 
 /**
  * The clickable body map shown in place of the case type list when the org has

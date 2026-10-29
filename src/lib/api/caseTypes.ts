@@ -77,10 +77,123 @@ export async function updateCaseTypeOrders(
   return { error: failed?.error?.message ?? null }
 }
 
+/**
+ * Archives a case type for every provider at once. Offerings are left as they
+ * are, so restoring the case type brings back exactly what each provider had.
+ * The row keeps its map_tag for the same reason; the unique index only counts
+ * live rows, so the spot is free for another case type meanwhile.
+ */
 export async function archiveCaseType(id: string): Promise<{ error: string | null }> {
   const { error } = await supabase.from('case_types').update({ is_archived: true }).eq('id', id)
 
   return { error: error?.message ?? null }
+}
+
+export async function getArchivedCaseTypes(orgId: string): Promise<CaseType[]> {
+  const { data, error } = await supabase
+    .from('case_types')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('is_archived', true)
+    .order('name', { ascending: true })
+
+  if (error || !data) {
+    return []
+  }
+
+  return data as CaseType[]
+}
+
+/**
+ * Brings an archived case type back at the end of the list. If another case
+ * type took its body map spot while it was archived, it comes back without a
+ * spot rather than failing on the one-case-type-per-spot index.
+ */
+export async function restoreCaseType(
+  caseType: Pick<CaseType, 'id' | 'org_id' | 'map_tag'>,
+): Promise<{ error: string | null; lostSpot: boolean }> {
+  const { data: maxRow } = await supabase
+    .from('case_types')
+    .select('sort_order')
+    .eq('org_id', caseType.org_id)
+    .eq('is_archived', false)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const maxSort = maxRow?.sort_order
+  const update: { is_archived: false; sort_order: number; map_tag?: null } = {
+    is_archived: false,
+    sort_order: typeof maxSort === 'number' ? maxSort + 1 : 0,
+  }
+
+  let lostSpot = false
+  if (caseType.map_tag) {
+    const { data: holder, error: holderError } = await supabase
+      .from('case_types')
+      .select('id')
+      .eq('org_id', caseType.org_id)
+      .eq('is_archived', false)
+      .eq('map_tag', caseType.map_tag)
+      .limit(1)
+    if (holderError) {
+      return { error: holderError.message, lostSpot }
+    }
+    if (holder?.length) {
+      update.map_tag = null
+      lostSpot = true
+    }
+  }
+
+  const { error } = await supabase.from('case_types').update(update).eq('id', caseType.id)
+
+  return { error: error?.message ?? null, lostSpot }
+}
+
+/** A provider offering a case type, with the ids of every such offering. */
+export interface CaseTypeProvider {
+  providerId: string
+  providerName: string
+  offeringIds: string[]
+}
+
+/**
+ * The live providers offering a case type, so it can be archived for just
+ * some of them. A provider can offer one case type several times (different
+ * locations or constraints); those offerings are grouped under one entry.
+ */
+export async function getCaseTypeProviders(caseTypeId: string): Promise<CaseTypeProvider[]> {
+  // offerings -> providers is many-to-one, so PostgREST embeds one object; the
+  // inferred type says array, hence the override.
+  type Row = { id: string; provider_id: string; providers: { name: string } | null }
+  const rows = await selectAllRows<Row>((from, to) =>
+    supabase
+      .from('offerings')
+      .select('id, provider_id, providers!inner(name)')
+      .eq('case_type_id', caseTypeId)
+      .eq('is_archived', false)
+      .eq('providers.is_archived', false)
+      .range(from, to)
+      .overrideTypes<Row[], { merge: false }>(),
+  )
+
+  // Throws rather than returning [], which would read as "no provider offers
+  // this" and steer the admin to archive it for everyone.
+  if (!rows) {
+    throw new Error('Could not load the providers offering this case type')
+  }
+
+  const byProvider = new Map<string, CaseTypeProvider>()
+  for (const row of rows) {
+    const entry = byProvider.get(row.provider_id) ?? {
+      providerId: row.provider_id,
+      providerName: row.providers?.name ?? 'Unnamed provider',
+      offeringIds: [],
+    }
+    entry.offeringIds.push(row.id)
+    byProvider.set(row.provider_id, entry)
+  }
+
+  return [...byProvider.values()].sort((a, b) => a.providerName.localeCompare(b.providerName))
 }
 
 /**

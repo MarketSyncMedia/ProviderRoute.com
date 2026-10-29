@@ -153,6 +153,7 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   icon,
   rowExtra,
   toolbarExtra,
+  archiveDialog,
 }: {
   /**
    * Key prefix for this page's own query; the org id is appended. Must be
@@ -174,13 +175,24 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   rowExtra?: (entity: T, all: T[]) => ReactNode
   /** Page-specific controls rendered beside the add button. */
   toolbarExtra?: (all: T[]) => ReactNode
+  /**
+   * Replaces the plain archive confirmation, for a page whose archive has
+   * choices of its own. `refresh` invalidates the same keys as every other
+   * mutation here; the dialog calls it after writing and then `close`.
+   */
+  archiveDialog?: (args: {
+    entity: T
+    offeringCount: number
+    close: () => void
+    refresh: () => Promise<void>
+  }) => ReactNode
 }) {
   const orgId = useAuthStore((s) => s.org?.id ?? '')
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
   /** Refresh this page's rows and every other view of the same entity. */
-  async function invalidateAll() {
+  async function invalidateAll(): Promise<void> {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: [queryKey, orgId] }),
       ...alsoInvalidate.map((key) => queryClient.invalidateQueries({ queryKey: [key, orgId] })),
@@ -405,24 +417,26 @@ export default function SortableEntityListPage<T extends SortableEntity>({
           }
         />
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-            {items.map((entity) => {
-              const offeringCount = rows.find((r) => r.entity.id === entity.id)?.offeringCount ?? 0
-              return (
-                <SortableEntityRow
-                  key={entity.id}
-                  entity={entity}
-                  offeringCount={offeringCount}
-                  singularLower={copy.singularLower}
-                  extra={rowExtra?.(entity, items)}
-                  onEdit={() => openEdit(entity)}
-                  onArchive={() => setModal({ type: 'archive', payload: entity })}
-                />
-              )
-            })}
-          </SortableContext>
-        </DndContext>
+        <section aria-label={copy.pluralLower}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              {items.map((entity) => {
+                const offeringCount = rows.find((r) => r.entity.id === entity.id)?.offeringCount ?? 0
+                return (
+                  <SortableEntityRow
+                    key={entity.id}
+                    entity={entity}
+                    offeringCount={offeringCount}
+                    singularLower={copy.singularLower}
+                    extra={rowExtra?.(entity, items)}
+                    onEdit={() => openEdit(entity)}
+                    onArchive={() => setModal({ type: 'archive', payload: entity })}
+                  />
+                )
+              })}
+            </SortableContext>
+          </DndContext>
+        </section>
       )}
 
       {modal.type === 'add' || modal.type === 'edit' ? (
@@ -477,8 +491,17 @@ export default function SortableEntityListPage<T extends SortableEntity>({
         </div>
       ) : null}
 
+      {archiveDialog && archivePayload
+        ? archiveDialog({
+            entity: archivePayload,
+            offeringCount: archiveOfferingCount,
+            close: () => setModal({ type: null }),
+            refresh: invalidateAll,
+          })
+        : null}
+
       <ConfirmDialog
-        isOpen={modal.type === 'archive'}
+        isOpen={modal.type === 'archive' && !archiveDialog}
         title={`Archive ${copy.singular}`}
         message={
           modal.type === 'archive' && modal.payload
