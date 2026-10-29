@@ -38,6 +38,7 @@ import {
   restoreOffering,
   updateOffering,
 } from '../../lib/api/offerings'
+import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import { supabase } from '../../lib/supabase'
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../shared/avatarPalette'
 import { readableTextColor } from '../../shared/colorContrast'
@@ -448,6 +449,12 @@ export default function ProviderProfilePage() {
       return
     }
 
+    // The provider's offerings drop out of the data table and every count.
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['providers', orgId] }),
+      queryClient.invalidateQueries({ queryKey: ['provider', id] }),
+      invalidateOfferingReaders(queryClient, orgId),
+    ])
     toast.success('Provider archived')
     navigate('/providers')
   }
@@ -486,7 +493,7 @@ export default function ProviderProfilePage() {
       }
     }
 
-    await queryClient.invalidateQueries({ queryKey: ['provider-offerings', id] })
+    await invalidateOfferingReaders(queryClient, orgId)
     const toastType = modal.type
     setModal({ type: null })
     toast.success(toastType === 'add-offering' ? 'Offering added' : 'Offering updated')
@@ -501,7 +508,7 @@ export default function ProviderProfilePage() {
       toast.error(result.error)
       return
     }
-    await queryClient.invalidateQueries({ queryKey: ['provider-offerings', id] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Offering restored')
   }
 
@@ -988,7 +995,7 @@ export default function ProviderProfilePage() {
       onConfirm={async () => {
         const result = await archiveOffering(modal.payload!.id)
         if (!result.error) {
-          queryClient.invalidateQueries({ queryKey: ['provider-offerings', id] })
+          void invalidateOfferingReaders(queryClient, orgId)
           toast.success('Offering removed')
         }
         setModal({ type: null })

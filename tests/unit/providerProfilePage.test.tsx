@@ -97,8 +97,10 @@ function makeProvider(over: Partial<Provider> = {}): Provider {
   }
 }
 
+let client: QueryClient
+
 function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/providers/p1']}>
@@ -205,5 +207,41 @@ describe('ProviderProfilePage archived offerings', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Archived offerings/ }))
 
     expect(screen.getByText('No archived offerings')).toBeInTheDocument()
+  })
+})
+
+describe('ProviderProfilePage archiving the provider', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAuthStore.setState({
+      org: { id: 'org1', name: 'Test Org' } as never,
+      user: { id: 'u1', org_id: 'org1', name: 'Tester', email: 't@example.com' } as never,
+    })
+    providersApi.getProvider.mockResolvedValue(makeProvider())
+    providersApi.archiveProvider.mockResolvedValue({ error: null })
+    offeringsApi.getOfferingsByProvider.mockResolvedValue([])
+    offeringsApi.getArchivedOfferingsByProvider.mockResolvedValue([])
+    providerLocationsApi.getProviderLocations.mockResolvedValue([])
+  })
+
+  it('refreshes the provider list, data table and counts, which stop listing them', async () => {
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: /archive provider/i }))
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
+
+    await waitFor(() => expect(providersApi.archiveProvider).toHaveBeenCalledWith('p1'))
+    await waitFor(() =>
+      expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual(
+        expect.arrayContaining([
+          ['providers', 'org1'],
+          ['data-table-offerings', 'org1'],
+          ['case-types-with-counts', 'org1'],
+          ['locations-with-counts', 'org1'],
+          ['categories-with-counts', 'org1'],
+        ]),
+      ),
+    )
   })
 })

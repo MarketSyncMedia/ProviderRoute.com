@@ -52,8 +52,10 @@ vi.mock('../../src/components/ui/toastStore', () => ({ useToast: () => ({ toast 
 import CaseTypesPage from '../../src/pages/case-types/CaseTypesPage'
 import { useAuthStore } from '../../src/stores/authStore'
 
+let client: QueryClient
+
 function renderPage() {
-  const client = new QueryClient({
+  client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
   return render(
@@ -62,6 +64,14 @@ function renderPage() {
     </QueryClientProvider>,
   )
 }
+
+/** The query keys invalidated so far, for checking which pages refresh. */
+function invalidatedKeys(spy: { mock: { calls: unknown[][] } }) {
+  return spy.mock.calls.map(([filters]) => (filters as { queryKey: unknown[] }).queryKey)
+}
+
+/** The offering views that must refresh when a case type is archived or restored. */
+const OFFERING_VIEWS = [['data-table-offerings', 'org1'], ['provider-offerings'], ['locations-with-counts', 'org1']]
 
 /** The draggable case type list, as opposed to the body map section. */
 async function list() {
@@ -350,6 +360,18 @@ describe('CaseTypesPage archiving', () => {
     expect(toast.success).toHaveBeenCalledWith('Knee Pain archived for all providers')
   })
 
+  it('refreshes the data table and provider pages, which stop listing its offerings', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await openArchive(user, 'Knee Pain')
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    await user.click(screen.getByRole('button', { name: 'Archive for all providers' }))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining(OFFERING_VIEWS))
+  })
+
   it('archives only the ticked providers’ offerings, leaving the case type', async () => {
     const user = userEvent.setup()
     renderPage()
@@ -421,6 +443,19 @@ describe('CaseTypesPage archived case types', () => {
 
     await waitFor(() => expect(api.restoreCaseType).toHaveBeenCalledWith(archivedHip))
     expect(toast.success).toHaveBeenCalledWith('Hip Pain restored')
+  })
+
+  it('refreshes the data table and provider pages, which list its offerings again', async () => {
+    api.getArchivedCaseTypes.mockResolvedValue([archivedHip])
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Archived case types (1)' }))
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    await user.click(screen.getByRole('button', { name: 'Restore Hip Pain' }))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining(OFFERING_VIEWS))
   })
 
   it('says so when the restored case type’s spot was taken meanwhile', async () => {
