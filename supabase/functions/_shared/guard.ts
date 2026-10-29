@@ -114,9 +114,23 @@ export function rateLimit(key: string, limit: number, windowMs: number): boolean
   return true
 }
 
-/** Caller identity for rate limiting: real client IP where the platform gives one. */
+/**
+ * Caller identity for rate limiting: the real client IP.
+ *
+ * Prefer headers the fronting proxy sets and overwrites on every request
+ * (`cf-connecting-ip`, then `x-real-ip`) over `x-forwarded-for`, whose leftmost
+ * entry is supplied by the caller and so can be rotated to defeat the limit.
+ * X-Forwarded-For is only a last resort, and then its *last* hop -- the address
+ * the trusted proxy appended -- is used, not the client-controlled first one.
+ */
 export function clientKey(req: Request): string {
+  const trusted = req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip')
+  if (trusted) return trusted.trim()
+
   const fwd = req.headers.get('x-forwarded-for')
-  if (fwd) return fwd.split(',')[0].trim()
-  return req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? 'unknown'
+  if (fwd) {
+    const hops = fwd.split(',').map((h) => h.trim()).filter(Boolean)
+    if (hops.length > 0) return hops[hops.length - 1]
+  }
+  return 'unknown'
 }
