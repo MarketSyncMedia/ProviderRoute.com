@@ -28,12 +28,15 @@ import {
   updateOfferingLocationIds,
   updateProviderCategories,
 } from '../../lib/api/dataTable'
+import { getCaseTypes } from '../../lib/api/caseTypes'
+import { getCategories } from '../../lib/api/categories'
+import { getConstraints } from '../../lib/api/constraints'
+import { getLocations } from '../../lib/api/locations'
 import { createOffering } from '../../lib/api/offerings'
 import { getProviders } from '../../lib/api/providers'
 import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
-import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../stores/authStore'
-import type { CaseType, Category, Constraint, Location } from '../../types/database'
+import type { Constraint } from '../../types/database'
 
 function getProvider(offering: Record<string, unknown>) {
   const provider = offering.providers
@@ -122,54 +125,25 @@ export default function DataTablePage() {
 
   const { data: locations = [], isLoading: locationsLoading } = useQuery({
     queryKey: ['locations', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('locations')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as Location[]
-    },
+    queryFn: () => getLocations(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: constraints = [], isLoading: constraintsLoading } = useQuery({
     queryKey: ['constraints', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('constraints')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as Constraint[]
-    },
+    queryFn: () => getConstraints(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: caseTypes = [], isLoading: caseTypesLoading } = useQuery({
     queryKey: ['case-types', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('case_types')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as CaseType[]
-    },
+    queryFn: () => getCaseTypes(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['categories', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as Category[]
-    },
+    queryFn: () => getCategories(orgId),
     enabled: Boolean(orgId),
   })
 
@@ -202,7 +176,7 @@ export default function DataTablePage() {
     }
     await invalidateOfferingReaders(queryClient, orgId)
     setAddOfferingOpen(false)
-    toast.success('Offering added')
+    toast.success(result.restored ? 'Archived offering restored with these details' : 'Offering added')
   }
 
   // Load compact mode from localStorage once on mount
@@ -1190,7 +1164,7 @@ export default function DataTablePage() {
               toast.success('Selected offerings archived')
             }}
           >
-            Delete Selected
+            Archive Selected
           </button>
           <button type="button" className="underline" onClick={() => setSelectedRows(new Set())}>
             Deselect All

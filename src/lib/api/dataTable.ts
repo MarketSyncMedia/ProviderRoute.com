@@ -1,4 +1,5 @@
 import { supabase } from '../supabase'
+import { offeringSaveError } from './offerings'
 import { selectAllRows } from './paginate'
 import type { Offering, Provider } from '../../types/database'
 
@@ -99,7 +100,7 @@ export async function updateOfferingCaseType(
     .update({ case_type_id: caseTypeId })
     .eq('id', offeringId)
 
-  return { error: error?.message ?? null }
+  return { error: error ? offeringSaveError(error) : null }
 }
 
 export async function updateProviderCategories(

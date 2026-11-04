@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Archive,
   ArchiveRestore,
   ChevronDown,
   ChevronLeft,
@@ -38,16 +39,16 @@ import {
   restoreOffering,
   updateOffering,
 } from '../../lib/api/offerings'
+import { getCaseTypes } from '../../lib/api/caseTypes'
+import { getCategories } from '../../lib/api/categories'
+import { getConstraints } from '../../lib/api/constraints'
+import { getLocations } from '../../lib/api/locations'
+import { constraintSummary } from '../../lib/constraintSummary'
 import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
-import { supabase } from '../../lib/supabase'
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../shared/avatarPalette'
 import { readableTextColor } from '../../shared/colorContrast'
 import { useAuthStore } from '../../stores/authStore'
 import type {
-  CaseType,
-  Category,
-  Constraint,
-  Location as OrgLocation,
   Offering,
   ProviderLocation,
 } from '../../types/database'
@@ -90,7 +91,7 @@ export default function ProviderProfilePage() {
   const [bookingLinks, setBookingLinks] = useState<Record<string, string>>({})
   const [phoneLinks, setPhoneLinks] = useState<Record<string, string>>({})
   const [modal, setModal] = useState<{
-    type: 'add-offering' | 'edit-offering' | 'delete-offering' | 'archive-provider' | null
+    type: 'add-offering' | 'edit-offering' | 'archive-offering' | 'archive-provider' | null
     payload?: Offering
   }>({ type: null })
   const [offeringInitial, setOfferingInitial] = useState<OfferingDraft>(() => emptyOfferingDraft())
@@ -117,15 +118,7 @@ export default function ProviderProfilePage() {
 
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['categories', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as Category[]
-    },
+    queryFn: () => getCategories(orgId),
     enabled: Boolean(orgId),
   })
 
@@ -137,15 +130,7 @@ export default function ProviderProfilePage() {
 
   const { data: orgLocations = [], isLoading: orgLocationsLoading } = useQuery({
     queryKey: ['locations', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('locations')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as OrgLocation[]
-    },
+    queryFn: () => getLocations(orgId),
     enabled: Boolean(orgId),
   })
 
@@ -165,27 +150,13 @@ export default function ProviderProfilePage() {
 
   const { data: orgCaseTypes = [] } = useQuery({
     queryKey: ['case-types', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('case_types')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as CaseType[]
-    },
+    queryFn: () => getCaseTypes(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: orgConstraints = [] } = useQuery({
     queryKey: ['constraints', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('constraints')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as Constraint[]
-    },
+    queryFn: () => getConstraints(orgId),
     enabled: Boolean(orgId),
   })
 
@@ -193,7 +164,7 @@ export default function ProviderProfilePage() {
   // from an effect, so the form never paints one frame of the previous
   // provider's values after navigating between profiles. Starts empty, not at
   // `provider`, so a provider already cached on arrival is copied too;
-  // otherwise reopening a profile within the stale time shows no specialties,
+  // otherwise reopening a profile within the stale time shows no categories,
   // and saving that form would write the blanks over the real values.
   const [syncedProvider, setSyncedProvider] = useState<typeof provider>(undefined)
   if (provider && provider !== syncedProvider) {
@@ -469,6 +440,7 @@ export default function ProviderProfilePage() {
 
     setOfferingSaving(true)
     setOfferingError('')
+    let savedMessage = 'Offering updated'
 
     if (modal.type === 'add-offering') {
       const result = await createOffering({
@@ -483,6 +455,7 @@ export default function ProviderProfilePage() {
         setOfferingSaving(false)
         return
       }
+      savedMessage = result.restored ? 'Archived offering restored with these details' : 'Offering added'
     }
 
     if (modal.type === 'edit-offering' && modal.payload?.id) {
@@ -499,9 +472,8 @@ export default function ProviderProfilePage() {
     }
 
     await invalidateOfferingReaders(queryClient, orgId)
-    const toastType = modal.type
     setModal({ type: null })
-    toast.success(toastType === 'add-offering' ? 'Offering added' : 'Offering updated')
+    toast.success(savedMessage)
     setOfferingSaving(false)
   }
 
@@ -651,7 +623,7 @@ export default function ProviderProfilePage() {
             </div>
 
             <div className="mt-4">
-              <label className="mb-2 block text-sm font-medium text-slate-700">Specialties</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Categories</label>
               <div className="mb-2 flex flex-wrap gap-2">
                 {categoryIds.map((categoryId) => {
                   const categoryName = categoryMap.get(categoryId)
@@ -684,7 +656,7 @@ export default function ProviderProfilePage() {
                   setCategoryIds((prev) => (prev.includes(categoryId) ? prev : [...prev, categoryId]))
                 }}
               >
-                <option value="">+ Add specialty</option>
+                <option value="">+ Add category</option>
                 {unassignedCategories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
@@ -829,14 +801,6 @@ export default function ProviderProfilePage() {
               const locationNames = offering.location_ids
                 .map((locationId) => locationNameById.get(locationId))
                 .filter((name): name is string => Boolean(name))
-              const constraintSummaryEntries = Object.entries(offering.constraints ?? {}).map(
-                ([key, value]) => `${key}: ${String(value)}`
-              )
-              const constraintSummary = constraintSummaryEntries.join(', ')
-              const displayConstraintSummary =
-                constraintSummary.length > 40
-                  ? `${constraintSummary.slice(0, 40)}...`
-                  : constraintSummary || '—'
 
               return (
                 <div
@@ -863,19 +827,21 @@ export default function ProviderProfilePage() {
                       ))
                     )}
                   </div>
-                  <div className="text-sm text-slate-600">{displayConstraintSummary}</div>
+                  <div className="text-sm text-slate-600">{constraintSummary(offering.constraints, orgConstraints) || '—'}</div>
                   <div className="flex gap-2">
                     <button
                       type="button"
+                      aria-label="Edit offering"
                       onClick={() => openEditOffering(offering)}
                     >
                       <Pencil className="h-4 w-4 cursor-pointer text-slate-400 hover:text-slate-600" />
                     </button>
                     <button
                       type="button"
-                      onClick={() => setModal({ type: 'delete-offering', payload: offering })}
+                      aria-label="Archive offering"
+                      onClick={() => setModal({ type: 'archive-offering', payload: offering })}
                     >
-                      <Trash2 className="h-4 w-4 cursor-pointer text-red-300 hover:text-red-500" />
+                      <Archive className="h-4 w-4 cursor-pointer text-red-300 hover:text-red-500" />
                     </button>
                   </div>
                 </div>
@@ -918,13 +884,6 @@ export default function ProviderProfilePage() {
                 const locationNames = offering.location_ids
                   .map((locationId) => locationNameById.get(locationId))
                   .filter((name): name is string => Boolean(name))
-                const constraintSummary = Object.entries(offering.constraints ?? {})
-                  .map(([key, value]) => `${key}: ${String(value)}`)
-                  .join(', ')
-                const displayConstraintSummary =
-                  constraintSummary.length > 40
-                    ? `${constraintSummary.slice(0, 40)}...`
-                    : constraintSummary || '—'
 
                 return (
                   <div
@@ -951,7 +910,7 @@ export default function ProviderProfilePage() {
                         ))
                       )}
                     </div>
-                    <div className="text-sm text-slate-600">{displayConstraintSummary}</div>
+                    <div className="text-sm text-slate-600">{constraintSummary(offering.constraints, orgConstraints) || '—'}</div>
                     <div>
                       <button
                         type="button"
@@ -992,16 +951,18 @@ export default function ProviderProfilePage() {
       />
     ) : null}
     <ConfirmDialog
-      isOpen={modal.type === 'delete-offering'}
-      title="Remove Offering"
-      message="Remove this offering? It moves to Archived offerings below, where you can restore it."
-      confirmLabel="Remove"
+      isOpen={modal.type === 'archive-offering'}
+      title="Archive Offering"
+      message="Archive this offering? It moves to Archived offerings below, where you can restore it."
+      confirmLabel="Archive"
       confirmVariant="danger"
       onConfirm={async () => {
         const result = await archiveOffering(modal.payload!.id)
-        if (!result.error) {
+        if (result.error) {
+          toast.error(result.error)
+        } else {
           void invalidateOfferingReaders(queryClient, orgId)
-          toast.success('Offering removed')
+          toast.success('Offering archived')
         }
         setModal({ type: null })
       }}

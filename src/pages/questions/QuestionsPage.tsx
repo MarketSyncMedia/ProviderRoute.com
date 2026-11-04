@@ -18,6 +18,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import {
+  Archive,
   Eye,
   FlaskConical,
   GripVertical,
@@ -26,7 +27,6 @@ import {
   Pencil,
   Plus,
   Stethoscope,
-  Trash2,
   User,
   X,
 } from 'lucide-react'
@@ -206,14 +206,14 @@ function SortableQuestionRow({
   constraintName,
   onPreview,
   onEdit,
-  onDelete,
+  onArchive,
 }: {
   question: Question
   orderLabel: string
   constraintName: string | null
   onPreview: () => void
   onEdit: () => void
-  onDelete: () => void
+  onArchive: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: question.id,
@@ -272,10 +272,10 @@ function SortableQuestionRow({
       <button
         type="button"
         className="rounded-lg p-2 text-red-400 hover:bg-red-50 hover:text-red-600"
-        aria-label="Delete question"
-        onClick={onDelete}
+        aria-label="Archive question"
+        onClick={onArchive}
       >
-        <Trash2 className="h-4 w-4" />
+        <Archive className="h-4 w-4" />
       </button>
     </div>
   )
@@ -288,10 +288,10 @@ export default function QuestionsPage() {
 
   const [items, setItems] = useState<Question[]>([])
   const [modal, setModal] = useState<{
-    type: 'add' | 'edit' | 'delete' | 'preview' | null
+    type: 'add' | 'edit' | 'archive' | 'preview' | null
     payload?: unknown
   }>({ type: null })
-  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [archiveLoading, setArchiveLoading] = useState(false)
   const [entryEditForm, setEntryEditForm] = useState<{
     question_text: string
     input_type: Question['input_type']
@@ -828,15 +828,15 @@ export default function QuestionsPage() {
     await queryClient.invalidateQueries({ queryKey: ['questions', orgId] })
   }
 
-  async function handleConfirmDelete() {
-    if (modal.type !== 'delete' || !modal.payload || !orgId) {
+  async function handleConfirmArchive() {
+    if (modal.type !== 'archive' || !modal.payload || !orgId) {
       return
     }
     const payload = modal.payload as Question
-    setDeleteLoading(true)
+    setArchiveLoading(true)
     const { error } = await archiveQuestion(payload.id)
     if (error) {
-      setDeleteLoading(false)
+      setArchiveLoading(false)
       toast.error(error)
       return
     }
@@ -847,11 +847,11 @@ export default function QuestionsPage() {
       .sort((a, b) => a.order_rank - b.order_rank)
     const updates = nonEntry.map((q, idx) => ({ id: q.id, order_rank: idx + 1 }))
     const { error: reorderErr } = await reorderQuestions(updates)
-    setDeleteLoading(false)
+    setArchiveLoading(false)
     if (reorderErr) {
       toast.error(reorderErr)
     } else {
-      toast.success('Question removed')
+      toast.success('Question archived')
     }
     await queryClient.invalidateQueries({ queryKey: ['questions', orgId] })
     setModal({ type: null })
@@ -991,7 +991,7 @@ export default function QuestionsPage() {
                       constraintName={cName}
                       onPreview={() => setModal({ type: 'preview', payload: question })}
                       onEdit={() => setModal({ type: 'edit', payload: question })}
-                      onDelete={() => setModal({ type: 'delete', payload: question })}
+                      onArchive={() => setModal({ type: 'archive', payload: question })}
                     />
                   )
                 })}
@@ -1538,13 +1538,13 @@ export default function QuestionsPage() {
       ) : null}
 
       <ConfirmDialog
-        isOpen={modal.type === 'delete'}
-        title="Remove Question"
-        message="Remove this question from the flow?"
-        confirmLabel="Remove"
+        isOpen={modal.type === 'archive'}
+        title="Archive Question"
+        message="Archive this question? The widget will stop asking it."
+        confirmLabel="Archive"
         confirmVariant="danger"
-        isLoading={deleteLoading}
-        onConfirm={handleConfirmDelete}
+        isLoading={archiveLoading}
+        onConfirm={handleConfirmArchive}
         onCancel={() => setModal({ type: null })}
       />
 
