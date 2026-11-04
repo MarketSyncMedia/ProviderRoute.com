@@ -103,11 +103,15 @@ export async function getLocationOfferingCounts(
     return counts
   }
 
+  // Counts what the data table lists, which leaves out offerings of an
+  // archived provider or case type.
   const rows = await selectAllRows<{ location_ids: string[] | null }>((from, to) =>
     supabase
       .from('offerings')
-      .select('location_ids')
+      .select('location_ids, providers!inner(), case_types!inner()')
       .eq('is_archived', false)
+      .eq('providers.is_archived', false)
+      .eq('case_types.is_archived', false)
       .overlaps('location_ids', locationIds)
       .range(from, to),
   )

@@ -216,8 +216,9 @@ export async function getCaseTypeOfferingCounts(
   const rows = await selectAllRows<{ case_type_id: string | null }>((from, to) =>
     supabase
       .from('offerings')
-      .select('case_type_id')
+      .select('case_type_id, providers!inner()')
       .eq('is_archived', false)
+      .eq('providers.is_archived', false)
       .in('case_type_id', caseTypeIds)
       .range(from, to),
   )

@@ -30,6 +30,7 @@ import {
 } from '../../lib/api/dataTable'
 import { createOffering } from '../../lib/api/offerings'
 import { getProviders } from '../../lib/api/providers'
+import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../stores/authStore'
 import type { CaseType, Category, Constraint, Location } from '../../types/database'
@@ -199,10 +200,7 @@ export default function DataTablePage() {
       setAddOfferingError(result.error)
       return
     }
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: offeringsQueryKey }),
-      queryClient.invalidateQueries({ queryKey: ['provider-offerings', draft.providerId] }),
-    ])
+    await invalidateOfferingReaders(queryClient, orgId)
     setAddOfferingOpen(false)
     toast.success('Offering added')
   }
@@ -951,7 +949,7 @@ export default function DataTablePage() {
         return
       }
     }
-    await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Location added to selected offerings')
     setBulkAddLocationId('')
   }
@@ -969,7 +967,7 @@ export default function DataTablePage() {
         return
       }
     }
-    await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Location removed from selected offerings')
     setBulkRemoveLocationId('')
   }
@@ -992,7 +990,7 @@ export default function DataTablePage() {
         return
       }
     }
-    await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Category applied to selected providers')
     setBulkCategoryId('')
   }
@@ -1187,7 +1185,7 @@ export default function DataTablePage() {
                 toast.error(result.error)
                 return
               }
-              await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+              await invalidateOfferingReaders(queryClient, orgId)
               setSelectedRows(new Set())
               toast.success('Selected offerings archived')
             }}
@@ -1426,7 +1424,7 @@ export default function DataTablePage() {
           if (result.error) {
             toast.error(result.error)
           } else {
-            await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+            await invalidateOfferingReaders(queryClient, orgId)
             toast.success('Offering archived')
           }
           setArchiveTargetId(null)
@@ -1447,7 +1445,7 @@ export default function DataTablePage() {
             toast.error(result.error)
             return
           }
-          await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+          await invalidateOfferingReaders(queryClient, orgId)
           toast.success('All offerings cleared')
           setClearAllOpen(false)
           setClearAllInput('')
@@ -1471,7 +1469,7 @@ export default function DataTablePage() {
         isOpen={showImport}
         onClose={() => setShowImport(false)}
         onComplete={() => {
-          queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+          void invalidateOfferingReaders(queryClient, orgId)
           setShowImport(false)
           toast.success('Import complete')
         }}
