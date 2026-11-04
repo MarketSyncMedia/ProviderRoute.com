@@ -447,8 +447,10 @@ export default function QuestionsPage() {
 
   // `items` is the drag-reorderable copy of nonEntryFromServer. Resync it
   // during render when the query returns new data, rather than from an
-  // effect, to avoid painting one stale frame after every refetch.
-  const [syncedItems, setSyncedItems] = useState(nonEntryFromServer)
+  // effect, to avoid painting one stale frame after every refetch. Starts at
+  // null, not the server list, so questions already cached on arrival are
+  // copied too; otherwise returning here within the stale time shows none.
+  const [syncedItems, setSyncedItems] = useState<Question[] | null>(null)
   if (nonEntryFromServer !== syncedItems) {
     setSyncedItems(nonEntryFromServer)
     setItems(nonEntryFromServer)

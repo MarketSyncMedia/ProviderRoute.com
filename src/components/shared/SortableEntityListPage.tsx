@@ -225,8 +225,10 @@ export default function SortableEntityListPage<T extends SortableEntity>({
 
   // `items` is the drag-reorderable copy of `rows`. Resyncing it during render
   // when the query returns new data — rather than from an effect — avoids
-  // painting one frame of the stale order after every refetch.
-  const [syncedRows, setSyncedRows] = useState(rows)
+  // painting one frame of the stale order after every refetch. Starts at null,
+  // not `rows`, so rows already cached on arrival are copied too; otherwise
+  // returning to this page within the stale time renders an empty list.
+  const [syncedRows, setSyncedRows] = useState<EntityRow<T>[] | null>(null)
   if (rows !== syncedRows) {
     setSyncedRows(rows)
     setItems(rows.map((r) => r.entity))

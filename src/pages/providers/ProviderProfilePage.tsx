@@ -190,8 +190,11 @@ export default function ProviderProfilePage() {
 
   // Seed the editable copies of the fetched provider during render rather than
   // from an effect, so the form never paints one frame of the previous
-  // provider's values after navigating between profiles.
-  const [syncedProvider, setSyncedProvider] = useState(provider)
+  // provider's values after navigating between profiles. Starts empty, not at
+  // `provider`, so a provider already cached on arrival is copied too;
+  // otherwise reopening a profile within the stale time shows no specialties,
+  // and saving that form would write the blanks over the real values.
+  const [syncedProvider, setSyncedProvider] = useState<typeof provider>(undefined)
   if (provider && provider !== syncedProvider) {
     setSyncedProvider(provider)
     setCategoryIds(provider.category_ids ?? [])
@@ -220,8 +223,10 @@ export default function ProviderProfilePage() {
   // that trips React's "Too many re-renders" the moment any other query on
   // this page resolves first (near-guaranteed, since there are several).
   // `undefined` stays referentially stable across renders, so gating on it
-  // being truthy (matching the syncedProvider pattern above) fixes it.
-  const [syncedProviderLocations, setSyncedProviderLocations] = useState(providerLocationsData)
+  // being truthy (matching the syncedProvider pattern above) fixes it. It
+  // starts empty for the same reason as syncedProvider: links already cached
+  // on arrival must be copied too.
+  const [syncedProviderLocations, setSyncedProviderLocations] = useState<typeof providerLocationsData>(undefined)
   if (providerLocationsData && providerLocationsData !== syncedProviderLocations) {
     const nextBooking: Record<string, string> = {}
     const nextPhone: Record<string, string> = {}
