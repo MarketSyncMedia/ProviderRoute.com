@@ -29,7 +29,14 @@ import { archiveProvider } from '../../src/lib/api/providers'
 
 let harness: TestHarness
 const ids = {} as Record<
-  'kept' | 'archived' | 'otherProvider' | 'keptCaseType' | 'archivedCaseType' | 'category' | 'location',
+  | 'kept'
+  | 'otherProvider'
+  | 'keptCaseType'
+  | 'removedCaseType'
+  | 'archivedCaseType'
+  | 'archivedRemovedCaseType'
+  | 'category'
+  | 'location',
   string
 > & { offerings: Record<string, string> }
 
@@ -56,7 +63,9 @@ beforeAll(async () => {
     category_ids: [ids.category],
   })
   ids.keptCaseType = await insert('case_types', { org_id: orgId, name: 'Archive Test Knee' })
+  ids.removedCaseType = await insert('case_types', { org_id: orgId, name: 'Archive Test Wrist' })
   ids.archivedCaseType = await insert('case_types', { org_id: orgId, name: 'Archive Test Hip' })
+  ids.archivedRemovedCaseType = await insert('case_types', { org_id: orgId, name: 'Archive Test Ankle' })
 
   const offering = (providerId: string, caseTypeId: string, isArchived: boolean) =>
     insert('offerings', {
@@ -70,13 +79,14 @@ beforeAll(async () => {
   ids.offerings = {
     live: await offering(ids.kept, ids.keptCaseType, false),
     liveArchivedCaseType: await offering(ids.kept, ids.archivedCaseType, false),
-    removed: await offering(ids.kept, ids.keptCaseType, true),
-    removedArchivedCaseType: await offering(ids.kept, ids.archivedCaseType, true),
+    removed: await offering(ids.kept, ids.removedCaseType, true),
+    removedArchivedCaseType: await offering(ids.kept, ids.archivedRemovedCaseType, true),
     otherProviderLive: await offering(ids.otherProvider, ids.keptCaseType, false),
-    otherProviderRemoved: await offering(ids.otherProvider, ids.keptCaseType, true),
+    otherProviderRemoved: await offering(ids.otherProvider, ids.removedCaseType, true),
   }
 
   expect((await archiveCaseType(ids.archivedCaseType)).error).toBeNull()
+  expect((await archiveCaseType(ids.archivedRemovedCaseType)).error).toBeNull()
   expect((await archiveProvider(ids.otherProvider)).error).toBeNull()
 }, 120_000)
 
@@ -113,8 +123,10 @@ describe('offerings of an archived case type or provider', () => {
   })
 
   it('come back as they were when the case type is restored', async () => {
-    const restored = await restoreCaseType({ id: ids.archivedCaseType, org_id: harness.tenantA.orgId, map_tag: null })
-    expect(restored.error).toBeNull()
+    for (const id of [ids.archivedCaseType, ids.archivedRemovedCaseType]) {
+      const restored = await restoreCaseType({ id, org_id: harness.tenantA.orgId, map_tag: null })
+      expect(restored.error).toBeNull()
+    }
 
     expect(idsOf(await getOfferingsByProvider(ids.kept))).toEqual(
       [ids.offerings.live, ids.offerings.liveArchivedCaseType].sort(),
