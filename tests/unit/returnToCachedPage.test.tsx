@@ -78,30 +78,13 @@ const offeringsApi = vi.hoisted(() => ({
 }))
 vi.mock('../../src/lib/api/offerings', () => offeringsApi)
 
-vi.mock('../../src/lib/api/locations', () => ({ getLocations: vi.fn().mockResolvedValue([]) }))
+vi.mock('../../src/lib/api/locations', () => ({
+  getLocations: vi.fn().mockResolvedValue([{ id: 'loc1', name: 'Bel Air' }]),
+}))
 vi.mock('../../src/lib/api/constraints', () => ({ getConstraints: vi.fn().mockResolvedValue([]) }))
 vi.mock('../../src/components/testing/LogicTester', () => ({ default: () => null }))
 vi.mock('../../src/components/ui/toastStore', () => ({
   useToast: () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }),
-}))
-
-// The provider profile reads these lists straight from supabase.
-const tables = vi.hoisted<Record<string, unknown[]>>(() => ({
-  categories: [{ id: 'cat1', name: 'Sports Medicine' }],
-  locations: [{ id: 'loc1', name: 'Bel Air' }],
-}))
-vi.mock('../../src/lib/supabase', () => ({
-  supabase: {
-    from: (table: string) => {
-      const builder: Record<string, unknown> = {}
-      for (const op of ['select', 'eq', 'order', 'in']) {
-        builder[op] = () => builder
-      }
-      builder.then = (ok: (v: { data: unknown[]; error: null }) => unknown) =>
-        Promise.resolve({ data: tables[table] ?? [], error: null }).then(ok)
-      return builder
-    },
-  },
 }))
 
 import CaseTypesPage from '../../src/pages/case-types/CaseTypesPage'
@@ -175,6 +158,8 @@ describe('returning to a page with cached data', () => {
   })
 
   it('fills the provider profile and has nothing to save', async () => {
+    categoriesApi.getCategories.mockResolvedValue([{ id: 'cat1', name: 'Sports Medicine', sort_order: 0 }])
+    caseTypesApi.getCaseTypes.mockResolvedValue([])
     providersApi.getProvider.mockResolvedValue({
       id: 'p1',
       org_id: 'org1',

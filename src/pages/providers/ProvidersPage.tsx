@@ -6,12 +6,11 @@ import { useNavigationIntent } from '../../hooks/useNavigationIntent'
 import ImportWizard from '../../components/import/ImportWizard'
 import EmptyState from '../../components/ui/EmptyState'
 import { useToast } from '../../components/ui/toastStore'
+import { getCategories } from '../../lib/api/categories'
 import { getProviders, createProvider } from '../../lib/api/providers'
-import { supabase } from '../../lib/supabase'
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../shared/avatarPalette'
 import { readableTextColor } from '../../shared/colorContrast'
 import { useAuthStore } from '../../stores/authStore'
-import type { Category } from '../../types/database'
 
 interface AddProviderForm {
   name: string
@@ -49,15 +48,7 @@ export default function ProvidersPage() {
 
   const { data: categories = [] } = useQuery({
     queryKey: ['categories', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as Category[]
-    },
+    queryFn: () => getCategories(orgId),
     enabled: Boolean(orgId),
   })
 

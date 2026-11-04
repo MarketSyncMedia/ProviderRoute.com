@@ -158,8 +158,7 @@ export interface CaseTypeProvider {
 
 /**
  * The live providers offering a case type, so it can be archived for just
- * some of them. A provider can offer one case type several times (different
- * locations or constraints); those offerings are grouped under one entry.
+ * some of them.
  */
 export async function getCaseTypeProviders(caseTypeId: string): Promise<CaseTypeProvider[]> {
   // offerings -> providers is many-to-one, so PostgREST embeds one object; the

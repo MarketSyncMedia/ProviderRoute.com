@@ -45,9 +45,8 @@ const offeringsApi = vi.hoisted(() => ({
 }))
 vi.mock('../../src/lib/api/offerings', () => offeringsApi)
 
-vi.mock('../../src/components/ui/toastStore', () => ({
-  useToast: () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }),
-}))
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
+vi.mock('../../src/components/ui/toastStore', () => ({ useToast: () => ({ toast }) }))
 
 // Minimal chainable stand-in for the supabase-js query builder: every method
 // returns itself, and it resolves like a promise when awaited — matching
@@ -69,7 +68,15 @@ function makeQueryBuilder(result: { data: unknown; error: unknown }) {
 
 vi.mock('../../src/lib/supabase', () => ({
   supabase: {
-    from: vi.fn(() => makeQueryBuilder({ data: [], error: null })),
+    from: vi.fn((table: string) =>
+      makeQueryBuilder({
+        data:
+          table === 'constraints'
+            ? [{ id: 'c1', name: 'Accepts Medicare', type: 'binary', mapped_key: 'medicare', sort_order: 0 }]
+            : [],
+        error: null,
+      }),
+    ),
   },
 }))
 
@@ -148,6 +155,48 @@ describe('ProviderProfilePage render stability', () => {
   })
 })
 
+describe('ProviderProfilePage offerings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAuthStore.setState({
+      org: { id: 'org1', name: 'Test Org' } as never,
+      user: { id: 'u1', org_id: 'org1', name: 'Tester', email: 't@example.com' } as never,
+    })
+    providersApi.getProvider.mockResolvedValue(makeProvider())
+    providerLocationsApi.getProviderLocations.mockResolvedValue([])
+    offeringsApi.getArchivedOfferingsByProvider.mockResolvedValue([])
+    offeringsApi.getOfferingsByProvider.mockResolvedValue([
+      {
+        id: 'o1',
+        provider_id: 'p1',
+        org_id: 'org1',
+        case_type_id: 'ct1',
+        location_ids: [],
+        constraints: { medicare: 1 },
+        is_archived: false,
+      },
+    ])
+  })
+
+  it('names constraints as the admin named them, not by their stored keys', async () => {
+    renderPage()
+
+    expect(await screen.findByText('Accepts Medicare')).toBeInTheDocument()
+    expect(screen.queryByText(/medicare: 1/)).not.toBeInTheDocument()
+  })
+
+  it('archives an offering under that name and reports a failure', async () => {
+    offeringsApi.archiveOffering.mockResolvedValue({ error: 'network down' })
+    renderPage()
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Archive offering' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
+
+    await waitFor(() => expect(offeringsApi.archiveOffering).toHaveBeenCalledWith('o1'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('network down'))
+  })
+})
+
 describe('ProviderProfilePage archived offerings', () => {
   const archivedOffering = {
     id: 'o9',
@@ -183,7 +232,9 @@ describe('ProviderProfilePage archived offerings', () => {
     await userEvent.click(header)
 
     expect(header).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('medicare: 1')).toBeInTheDocument()
+    // The constraint's name, not its stored key and value.
+    expect(await screen.findByText('Accepts Medicare')).toBeInTheDocument()
+    expect(screen.queryByText(/medicare: 1/)).not.toBeInTheDocument()
     expect(offeringsApi.getArchivedOfferingsByProvider).toHaveBeenCalledWith('p1')
   })
 

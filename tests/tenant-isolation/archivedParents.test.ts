@@ -25,6 +25,7 @@ import { getCategoryOfferingCounts } from '../../src/lib/api/categories'
 import { getArchivedDataTableOfferings, getDataTableOfferings } from '../../src/lib/api/dataTable'
 import { getLocationOfferingCounts } from '../../src/lib/api/locations'
 import { getArchivedOfferingsByProvider, getOfferingsByProvider } from '../../src/lib/api/offerings'
+import { createOffering, updateOffering } from '../../src/lib/api/offerings'
 import { archiveProvider } from '../../src/lib/api/providers'
 
 let harness: TestHarness
@@ -99,6 +100,33 @@ afterAll(async () => {
 
 const idsOf = (rows: Array<{ id: string }>) => rows.map((r) => r.id).sort()
 
+// These run against the real unique constraint on provider and case type,
+// which is what decides between a new, revived and refused offering.
+describe('adding an offering for a case type the provider already has', () => {
+  const add = (caseTypeId: string, locationIds: string[] = []) =>
+    createOffering({
+      provider_id: ids.kept,
+      case_type_id: caseTypeId,
+      org_id: harness.tenantA.orgId,
+      location_ids: locationIds,
+      constraints: { age_min: 5 },
+    })
+
+  it('refuses a live one, naming the problem rather than the constraint', async () => {
+    const result = await add(ids.keptCaseType)
+
+    expect(result.data).toBeNull()
+    expect(result.error).toMatch(/already has an offering for that case type/)
+    expect(result.error).not.toMatch(/duplicate key/)
+  })
+
+  it('refuses moving an offering onto a case type they already have', async () => {
+    const { error } = await updateOffering(ids.offerings.live, { case_type_id: ids.removedCaseType })
+
+    expect(error).toMatch(/already has an offering for that case type/)
+  })
+})
+
 describe('offerings of an archived case type or provider', () => {
   it('drop out of the data table', async () => {
     const rows = await getDataTableOfferings(harness.tenantA.orgId)
@@ -134,5 +162,21 @@ describe('offerings of an archived case type or provider', () => {
     expect(idsOf(await getArchivedOfferingsByProvider(ids.kept))).toEqual(
       [ids.offerings.removed, ids.offerings.removedArchivedCaseType].sort(),
     )
+  })
+
+  it('come back with the new details when the case type is added again', async () => {
+    const result = await createOffering({
+      provider_id: ids.kept,
+      case_type_id: ids.removedCaseType,
+      org_id: harness.tenantA.orgId,
+      location_ids: [],
+      constraints: { age_min: 5 },
+    })
+
+    expect(result).toMatchObject({ error: null, restored: true })
+    expect(result.data?.id).toBe(ids.offerings.removed)
+    expect(result.data?.constraints).toEqual({ age_min: 5 })
+    expect(idsOf(await getOfferingsByProvider(ids.kept))).toContain(ids.offerings.removed)
+    expect(idsOf(await getArchivedOfferingsByProvider(ids.kept))).not.toContain(ids.offerings.removed)
   })
 })

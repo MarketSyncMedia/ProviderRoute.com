@@ -4,6 +4,7 @@ import { ArchiveRestore } from 'lucide-react'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import { useToast } from '../../components/ui/toastStore'
 import { getArchivedDataTableOfferings, restoreOfferings } from '../../lib/api/dataTable'
+import { constraintSummary } from '../../lib/constraintSummary'
 import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import type { CaseType, Constraint, Location } from '../../types/database'
 
@@ -14,23 +15,6 @@ interface ArchivedOfferingsViewProps {
   caseTypes: CaseType[]
   locations: Location[]
   constraints: Constraint[]
-}
-
-function constraintSummary(raw: unknown, constraints: Constraint[]): string {
-  const values = (raw ?? {}) as Record<string, unknown>
-  const parts: string[] = []
-  for (const c of constraints) {
-    const v = values[c.mapped_key]
-    if (v === undefined || v === null || v === '') continue
-    if (c.type === 'binary') {
-      if (v === 1 || v === '1' || v === true) parts.push(c.name)
-      continue
-    }
-    const secondary = c.secondary_mapped_key ? values[c.secondary_mapped_key] : undefined
-    const hasSecondary = secondary !== undefined && secondary !== null && secondary !== ''
-    parts.push(`${c.name}: ${String(v)}${hasSecondary ? `–${String(secondary)}` : ''}`)
-  }
-  return parts.join(', ')
 }
 
 export default function ArchivedOfferingsView({
