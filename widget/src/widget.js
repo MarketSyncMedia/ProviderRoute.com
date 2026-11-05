@@ -1423,7 +1423,12 @@ import { liveProviderLocations } from './providerLocations'
       var phoneMode = provider.phone_mode === 'default' ? orgPhoneMode : (provider.phone_mode || orgPhoneMode)
 
       // Get provider locations
-      var provLocs = liveProviderLocations(this.data.providerLocations, this.data.offerings, provider.id)
+      var provLocs = liveProviderLocations(
+        this.data.providerLocations,
+        this.data.offerings,
+        provider.id,
+        this.state.selectedCaseTypeId
+      )
 
       // Build card
       var card = document.createElement('div')

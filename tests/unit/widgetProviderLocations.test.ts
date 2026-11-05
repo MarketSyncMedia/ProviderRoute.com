@@ -6,6 +6,10 @@ import { liveProviderLocations } from '../../widget/src/providerLocations.js'
  * their last offering there, so restoring the offering brings them back. The
  * widget must not offer those saved details while no offering is live there:
  * it would send a patient to a location the provider no longer covers.
+ *
+ * Likewise a patient who chose a case type must only be offered the locations
+ * where the provider treats that case type, not ones they cover only for
+ * another.
  */
 
 const towson = { provider_id: 'p1', location_id: 'towson', booking_link: 'https://book.example/towson', phone: '4105550100' }
@@ -28,6 +32,24 @@ describe('liveProviderLocations', () => {
 
   it("does not count another provider's offering at that location", () => {
     expect(liveProviderLocations([rosedale], offerings, 'p1')).toEqual([])
+  })
+
+  it('offers only the locations where the provider treats the chosen case type', () => {
+    const byCaseType = [
+      { provider_id: 'p1', case_type_id: 'knee', location_ids: ['towson'] },
+      { provider_id: 'p1', case_type_id: 'shoulder', location_ids: ['rosedale'] },
+    ]
+    expect(liveProviderLocations([towson, rosedale], byCaseType, 'p1', 'knee')).toEqual([towson])
+    expect(liveProviderLocations([towson, rosedale], byCaseType, 'p1', 'shoulder')).toEqual([rosedale])
+    expect(liveProviderLocations([towson, rosedale], byCaseType, 'p1', 'hip')).toEqual([])
+  })
+
+  it('offers every live location when no case type has been chosen', () => {
+    const byCaseType = [
+      { provider_id: 'p1', case_type_id: 'knee', location_ids: ['towson'] },
+      { provider_id: 'p1', case_type_id: 'shoulder', location_ids: ['rosedale'] },
+    ]
+    expect(liveProviderLocations([towson, rosedale], byCaseType, 'p1', null)).toEqual([towson, rosedale])
   })
 
   it('copes with missing data', () => {
@@ -60,6 +82,29 @@ afterEach(() => {
 })
 
 describe('the provider card', () => {
+  it('offers only the locations for the case type the patient chose', async () => {
+    const api = await boot()
+    api.data = {
+      config: { default_booking_mode: 'advanced', default_phone_mode: 'advanced' },
+      locations: [
+        { id: 'towson', name: 'Towson' },
+        { id: 'rosedale', name: 'Rosedale' },
+      ],
+      offerings: [
+        { provider_id: 'p1', case_type_id: 'knee', location_ids: ['towson'] },
+        { provider_id: 'p1', case_type_id: 'shoulder', location_ids: ['rosedale'] },
+      ],
+      providerLocations: [towson, rosedale],
+    }
+    api.state = { ...api.state, selectedLocationId: null, selectedCaseTypeId: 'knee' }
+
+    const card = api.buildCard({ id: 'p1', name: 'Dr. Adams', booking_mode: 'default', phone_mode: 'default' })
+
+    expect(card.innerHTML).toContain('https://book.example/towson')
+    expect(card.innerHTML).not.toContain('https://book.example/rosedale')
+    expect(card.innerHTML).not.toContain('4105550200')
+  })
+
   it('offers booking and phone only where the provider has a live offering', async () => {
     const api = await boot()
     api.data = {
