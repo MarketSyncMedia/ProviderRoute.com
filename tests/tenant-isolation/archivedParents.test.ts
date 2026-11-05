@@ -110,8 +110,10 @@ describe('archiving a provider\'s last offering at a location', () => {
       category_ids: [],
     })
     // The tests above and below count the org's live offerings, and this one
-    // ends with a live offering restored. Deleting the provider takes its
-    // offerings and saved details with it, so it leaves nothing behind.
+    // ends with a live offering restored, so it removes its provider when done.
+    // The saved details go first: the audit trigger on provider_locations looks
+    // the provider up by id, so a cascade from the provider's own delete finds
+    // it already gone and raises. (Clear All Data deletes in the same order.)
     try {
       const offeringId = await insert('offerings', {
         org_id: harness.tenantA.orgId,
@@ -134,6 +136,11 @@ describe('archiving a provider\'s last offering at a location', () => {
         expect.objectContaining({ booking_link: link, phone: '4105550100' }),
       ])
     } finally {
+      const { error: locationsError } = await harness.service
+        .from('provider_locations')
+        .delete()
+        .eq('provider_id', providerId)
+      expect(locationsError).toBeNull()
       const { error } = await harness.service.from('providers').delete().eq('id', providerId)
       expect(error).toBeNull()
     }
