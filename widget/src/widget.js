@@ -1,6 +1,7 @@
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../src/shared/avatarPalette'
 import { readableTextColor } from '../../src/shared/colorContrast'
 import { bodyMapStyles, buildBodyMap } from './bodyMap'
+import { liveProviderLocations } from './providerLocations'
 
 ;(function () {
   'use strict'
@@ -1422,9 +1423,7 @@ import { bodyMapStyles, buildBodyMap } from './bodyMap'
       var phoneMode = provider.phone_mode === 'default' ? orgPhoneMode : (provider.phone_mode || orgPhoneMode)
 
       // Get provider locations
-      var provLocs = (this.data.providerLocations || []).filter(function (pl) {
-        return pl.provider_id === provider.id
-      })
+      var provLocs = liveProviderLocations(this.data.providerLocations, this.data.offerings, provider.id)
 
       // Build card
       var card = document.createElement('div')

@@ -25,7 +25,8 @@ import { getCategoryOfferingCounts } from '../../src/lib/api/categories'
 import { getArchivedDataTableOfferings, getDataTableOfferings } from '../../src/lib/api/dataTable'
 import { getLocationOfferingCounts } from '../../src/lib/api/locations'
 import { getArchivedOfferingsByProvider, getOfferingsByProvider } from '../../src/lib/api/offerings'
-import { createOffering, updateOffering } from '../../src/lib/api/offerings'
+import { archiveOffering, createOffering, restoreOffering, updateOffering } from '../../src/lib/api/offerings'
+import { getProviderLocations, upsertProviderLocation } from '../../src/lib/api/providerLocations'
 import { archiveProvider } from '../../src/lib/api/providers'
 
 let harness: TestHarness
@@ -99,6 +100,52 @@ afterAll(async () => {
 }, 120_000)
 
 const idsOf = (rows: Array<{ id: string }>) => rows.map((r) => r.id).sort()
+
+describe('archiving a provider\'s last offering at a location', () => {
+  it('keeps their booking link and phone there, so restoring brings them back', async () => {
+    const providerId = await insert('providers', {
+      org_id: harness.tenantA.orgId,
+      name: 'Archive Test Provider 3',
+      normalized_name: 'archive test provider 3',
+      category_ids: [],
+    })
+    // The tests above and below count the org's live offerings, and this one
+    // ends with a live offering restored, so it removes its provider when done.
+    // The saved details go first: the audit trigger on provider_locations looks
+    // the provider up by id, so a cascade from the provider's own delete finds
+    // it already gone and raises. (Clear All Data deletes in the same order.)
+    try {
+      const offeringId = await insert('offerings', {
+        org_id: harness.tenantA.orgId,
+        provider_id: providerId,
+        case_type_id: ids.keptCaseType,
+        location_ids: [ids.location],
+        constraints: {},
+      })
+      const link = 'https://book.example/archive-test'
+      expect((await upsertProviderLocation(providerId, ids.location, link, '4105550100')).error).toBeNull()
+
+      expect((await archiveOffering(offeringId)).error).toBeNull()
+      expect(await getProviderLocations(providerId)).toEqual([
+        expect.objectContaining({ location_id: ids.location, booking_link: link, phone: '4105550100' }),
+      ])
+
+      expect((await restoreOffering(offeringId)).error).toBeNull()
+      expect(idsOf(await getOfferingsByProvider(providerId))).toEqual([offeringId])
+      expect(await getProviderLocations(providerId)).toEqual([
+        expect.objectContaining({ booking_link: link, phone: '4105550100' }),
+      ])
+    } finally {
+      const { error: locationsError } = await harness.service
+        .from('provider_locations')
+        .delete()
+        .eq('provider_id', providerId)
+      expect(locationsError).toBeNull()
+      const { error } = await harness.service.from('providers').delete().eq('id', providerId)
+      expect(error).toBeNull()
+    }
+  })
+})
 
 // These run against the real unique constraint on provider and case type,
 // which is what decides between a new, revived and refused offering.
