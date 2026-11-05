@@ -590,6 +590,53 @@ describe('tenant isolation (staging Supabase RLS)', () => {
     })
   })
 
+  describe('10b. imports and archived offerings', () => {
+    it('brings back an archived offering instead of failing on the unique constraint', async () => {
+      const { tenantA, runId } = harness
+      const name = `Revive Provider ${runId}`
+      const caseName = `Revive Case ${runId}`
+      const key = name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+
+      const { data: provider, error: providerError } = await tenantA.client
+        .from('providers')
+        .insert({ org_id: tenantA.orgId, name, normalized_name: key, category_ids: [] })
+        .select('id')
+        .single()
+      expect(providerError).toBeNull()
+      const { data: caseType, error: caseTypeError } = await tenantA.client
+        .from('case_types')
+        .insert({ org_id: tenantA.orgId, name: caseName })
+        .select('id')
+        .single()
+      expect(caseTypeError).toBeNull()
+      const { error: offeringError } = await tenantA.client.from('offerings').insert({
+        org_id: tenantA.orgId,
+        provider_id: provider!.id,
+        case_type_id: caseType!.id,
+        location_ids: [],
+        constraints: { age_min: 1 },
+        is_archived: true,
+      })
+      expect(offeringError).toBeNull()
+
+      const { data, error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(name, caseName, {
+          conflicts: [{ rowIndex: 0, existingProviderId: provider!.id }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect(data).toMatchObject({ providersUpdated: 1, offeringsUpserted: 1 })
+
+      const { data: offerings } = await tenantA.client
+        .from('offerings')
+        .select('is_archived')
+        .eq('provider_id', provider!.id)
+        .eq('case_type_id', caseType!.id)
+      expect(offerings).toEqual([{ is_archived: false }])
+    })
+  })
+
   describe('11. live widget publication requirements', () => {
     const PRIVACY_URL = 'https://example.invalid/privacy'
     const DISCLAIMER = 'Informational only, not medical advice.'
