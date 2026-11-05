@@ -30,6 +30,7 @@ export interface BodyMapSpot {
 export const BODY_MAP_SPOTS: readonly BodyMapSpot[] = [
   { tag: 'shoulder', label: 'Shoulder', view: 'front', x: 26.49, y: 21.23, keywords: ['shoulder', 'rotator cuff'] },
   { tag: 'clavicle', label: 'Clavicle', view: 'front', x: 60.16, y: 21.26, keywords: ['clavicle', 'collarbone', 'collar bone'] },
+  { tag: 'bicep', label: 'Bicep', view: 'front', x: 77, y: 31.5, keywords: ['bicep', 'biceps'] },
   { tag: 'elbow', label: 'Elbow', view: 'front', x: 21.9, y: 39.17, keywords: ['elbow'] },
   { tag: 'hand', label: 'Hand', view: 'front', x: 11.42, y: 53.49, keywords: ['hand', 'finger', 'fingers', 'thumb'] },
   { tag: 'wrist', label: 'Wrist', view: 'front', x: 85.43, y: 48.95, keywords: ['wrist', 'carpal tunnel'] },

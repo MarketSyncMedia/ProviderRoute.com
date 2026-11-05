@@ -301,7 +301,7 @@ describe('CaseTypesPage body map section', () => {
     const offMap = (await screen.findByRole('heading', { name: /not on the body map \(1\)/i })).parentElement!
     expect(within(offMap).getByText('Shoulder Pain')).toBeInTheDocument()
     expect(within(offMap).queryByText('Knee Pain')).not.toBeInTheDocument()
-    expect(screen.getByText('1 of 17 spots linked')).toBeInTheDocument()
+    expect(screen.getByText('1 of 18 spots linked')).toBeInTheDocument()
   })
 
   it('applies only the suggestions left ticked', async () => {

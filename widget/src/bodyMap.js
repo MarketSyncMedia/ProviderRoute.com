@@ -38,6 +38,7 @@ var LABEL_SIZE = 46
 export var LABELS = {
   shoulder: { x: 205, y: 190, anchor: 'end' },
   clavicle: { x: 470, y: 190, anchor: 'start' },
+  bicep: { x: 565, y: 365, anchor: 'start' },
   elbow: { x: 140, y: 440, anchor: 'end' },
   pelvis: { x: 140, y: 575, anchor: 'end' },
   hand: { x: 120, y: 810, anchor: 'middle' },
