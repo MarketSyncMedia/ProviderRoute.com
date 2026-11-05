@@ -67,6 +67,72 @@ export async function updateCategoryOrders(
   return { error: failed?.error?.message ?? null }
 }
 
+/** A provider carrying a category. */
+export interface CategoryProvider {
+  id: string
+  name: string
+}
+
+/**
+ * Every provider with a category, archived ones included, so the admin can see
+ * what removing it touches. Throws rather than returning [], which would read
+ * as "no provider uses it" and make removing it look harmless.
+ */
+export async function getCategoryProviders(categoryId: string): Promise<CategoryProvider[]> {
+  const rows = await selectAllRows<CategoryProvider>((from, to) =>
+    supabase
+      .from('providers')
+      .select('id, name')
+      .contains('category_ids', [categoryId])
+      .order('name')
+      .order('id')
+      .range(from, to),
+  )
+  if (!rows) {
+    throw new Error('Could not load the providers with this category')
+  }
+  return rows
+}
+
+/**
+ * Deletes a category, first taking it off every provider that has it, or
+ * swapping it for `mergeIntoId` when given. Providers go first and the
+ * category last, so a failure partway leaves the category in place and
+ * running it again finishes the job.
+ */
+export async function removeCategory(
+  categoryId: string,
+  mergeIntoId: string | null,
+): Promise<{ error: string | null; providersUpdated: number }> {
+  const providers = await selectAllRows<{ id: string; category_ids: string[] | null }>((from, to) =>
+    supabase
+      .from('providers')
+      .select('id, category_ids')
+      .contains('category_ids', [categoryId])
+      .order('id')
+      .range(from, to),
+  )
+  if (!providers) {
+    return { error: 'Could not load the providers with this category', providersUpdated: 0 }
+  }
+
+  let providersUpdated = 0
+  for (const provider of providers) {
+    const next = (provider.category_ids ?? []).filter((id) => id !== categoryId)
+    if (mergeIntoId && !next.includes(mergeIntoId)) {
+      next.push(mergeIntoId)
+    }
+    const { error } = await supabase.from('providers').update({ category_ids: next }).eq('id', provider.id)
+    if (error) {
+      return { error: error.message, providersUpdated }
+    }
+    providersUpdated += 1
+  }
+
+  const { error } = await supabase.from('categories').delete().eq('id', categoryId)
+  return { error: error?.message ?? null, providersUpdated }
+}
+
 export async function archiveCategory(id: string): Promise<{ error: string | null }> {
   const { error } = await supabase.from('categories').update({ is_archived: true }).eq('id', id)
 

@@ -147,3 +147,68 @@ describe('ImportWizard closing', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('ImportWizard misspelled names', () => {
+  const rows = [
+    { provider: 'Dr. New Person', 'Case type': 'Shoulders', category: 'Sports Medincine, Podiatry' },
+  ]
+
+  beforeEach(() => {
+    parse.parseFile.mockResolvedValue({
+      headers: ['provider', 'Case type', 'category'],
+      rows,
+      errors: [],
+      rowCount: rows.length,
+    })
+    orgApi.getProviders.mockResolvedValue([])
+    orgApi.getCaseTypes.mockResolvedValue([{ id: 'ct1', name: 'Shoulder' }])
+    orgApi.getCategories.mockResolvedValue([{ id: 'cat1', name: 'Sports Medicine' }])
+  })
+
+  async function toNamesStep(user: ReturnType<typeof userEvent.setup>) {
+    renderWizard()
+    await waitFor(() => expect(orgApi.getProviders).toHaveBeenCalled())
+    await uploadFile(user)
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await mapColumn(user, 'provider', 'Provider Name')
+    await mapColumn(user, 'Case type', 'Case Type')
+    await mapColumn(user, 'category', 'Category')
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await screen.findByText('These names look misspelled')
+  }
+
+  async function runImport(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await user.click(await screen.findByRole('button', { name: /import|confirm|run/i }))
+    await waitFor(() => expect(exec.executeImportRun).toHaveBeenCalled())
+    return exec.executeImportRun.mock.calls[0][0]
+  }
+
+  it('offers to match near-miss case types and categories, and imports the matched names', async () => {
+    const user = userEvent.setup()
+    await toNamesStep(user)
+
+    expect(screen.getByRole('checkbox', { name: /“Shoulders”.*“Shoulder”/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /“Sports Medincine”.*“Sports Medicine”/ })).toBeChecked()
+    // "Podiatry" is simply new, so it is not flagged.
+    expect(screen.queryByText(/“Podiatry”/)).not.toBeInTheDocument()
+
+    const passed = await runImport(user)
+
+    expect(passed.rows).toEqual([
+      { provider: 'Dr. New Person', 'Case type': 'Shoulder', category: 'Sports Medicine, Podiatry' },
+    ])
+    // The file's own rows are not changed, only what is sent.
+    expect(rows[0]['Case type']).toBe('Shoulders')
+  })
+
+  it('keeps the file’s spelling for a name the user unticks', async () => {
+    const user = userEvent.setup()
+    await toNamesStep(user)
+
+    await user.click(screen.getByRole('checkbox', { name: /“Sports Medincine”/ }))
+    const passed = await runImport(user)
+
+    expect(passed.rows[0]).toMatchObject({ 'Case type': 'Shoulder', category: 'Sports Medincine, Podiatry' })
+  })
+})

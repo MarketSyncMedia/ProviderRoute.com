@@ -34,13 +34,14 @@ const api = vi.hoisted(() => ({
   updateCategory: vi.fn(),
   updateCategoryOrders: vi.fn(),
   archiveCategory: vi.fn(),
+  getCategoryProviders: vi.fn(),
+  removeCategory: vi.fn(),
 }))
 
 vi.mock('../../src/lib/api/categories', () => api)
 
-vi.mock('../../src/components/ui/toastStore', () => ({
-  useToast: () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }),
-}))
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
+vi.mock('../../src/components/ui/toastStore', () => ({ useToast: () => ({ toast }) }))
 
 import CategoriesPage from '../../src/pages/categories/CategoriesPage'
 import { useAuthStore } from '../../src/stores/authStore'
@@ -73,6 +74,8 @@ beforeEach(() => {
   api.updateCategory.mockResolvedValue({ error: null })
   api.updateCategoryOrders.mockResolvedValue({ error: null })
   api.archiveCategory.mockResolvedValue({ error: null })
+  api.getCategoryProviders.mockResolvedValue([])
+  api.removeCategory.mockResolvedValue({ error: null, providersUpdated: 0 })
 })
 
 describe('CategoriesPage modal state', () => {
@@ -211,20 +214,173 @@ describe('CategoriesPage modal state', () => {
     })
   })
 
-  it('archives the row whose archive button was clicked', async () => {
+  async function openRemove(user: ReturnType<typeof userEvent.setup>, name: string) {
+    const row = screen.getByText(name).closest('div') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: /remove category/i }))
+  }
+
+  it('removes the row whose remove button was clicked, after confirming', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Joint Replacement')
+
+    await openRemove(user, 'Joint Replacement')
+    expect(await screen.findByText('Joint Replacement is not on any providers.')).toBeInTheDocument()
+    expect(api.removeCategory).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Remove' }))
+
+    await waitFor(() => expect(api.removeCategory).toHaveBeenCalledWith('cat2', null))
+    expect(api.archiveCategory).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith('Joint Replacement removed')
+  })
+
+  it('says how many providers the category is on and how many were updated', async () => {
+    api.getCategoryProviders.mockResolvedValue([
+      { id: 'p1', name: 'Dr. Adams' },
+      { id: 'p2', name: 'Dr. Baker' },
+    ])
+    api.removeCategory.mockResolvedValue({ error: null, providersUpdated: 2 })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Joint Replacement')
+
+    await openRemove(user, 'Joint Replacement')
+    expect(await screen.findByText('Joint Replacement is on 2 providers.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remove' }))
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('Joint Replacement removed (2 providers updated)'),
+    )
+  })
+
+  it('offers to merge a misspelled duplicate into the category it was meant to be', async () => {
+    api.getCategories.mockResolvedValue([
+      category({ id: 'cat1', name: 'Sports Medicine', sort_order: 0 }),
+      category({ id: 'cat2', name: 'Joint Replacement', sort_order: 1 }),
+      category({ id: 'cat3', name: 'Sports Medincine', sort_order: 2 }),
+    ])
+    api.getCategoryProviders.mockResolvedValue([{ id: 'p1', name: 'Dr. Adams' }])
+    api.removeCategory.mockResolvedValue({ error: null, providersUpdated: 1 })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Sports Medincine')
+
+    await openRemove(user, 'Sports Medincine')
+
+    expect(await screen.findByText(/looks like a misspelling of sports medicine/i)).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /merge into another category/i })).toBeChecked()
+    expect(screen.getByRole('combobox', { name: 'Merge into' })).toHaveValue('cat1')
+    await user.click(screen.getByRole('button', { name: 'Merge into Sports Medicine' }))
+
+    await waitFor(() => expect(api.removeCategory).toHaveBeenCalledWith('cat3', 'cat1'))
+    expect(toast.success).toHaveBeenCalledWith(
+      'Sports Medincine merged into Sports Medicine (1 provider updated)',
+    )
+  })
+
+  it('removes without merging when asked to, and can merge into any other category', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Joint Replacement')
+
+    await openRemove(user, 'Sports Medicine')
+    // Nothing here looks like a misspelling, so it starts on plain removal.
+    expect(screen.getByRole('radio', { name: /just remove it/i })).toBeChecked()
+    await user.click(screen.getByRole('radio', { name: /merge into another category/i }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Merge into' }), 'cat2')
+    await user.click(screen.getByRole('button', { name: 'Merge into Joint Replacement' }))
+
+    await waitFor(() => expect(api.removeCategory).toHaveBeenCalledWith('cat1', 'cat2'))
+  })
+
+  it('keeps the dialog open and reports a failed removal', async () => {
+    api.removeCategory.mockResolvedValue({ error: 'permission denied', providersUpdated: 0 })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Joint Replacement')
+
+    await openRemove(user, 'Joint Replacement')
+    await user.click(await screen.findByRole('button', { name: 'Remove' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('permission denied'))
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+  })
+
+  it('will not remove while it cannot tell which providers use the category', async () => {
+    api.getCategoryProviders.mockRejectedValue(new Error('Could not load the providers with this category'))
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Joint Replacement')
+
+    await openRemove(user, 'Joint Replacement')
+
+    expect(await screen.findByText(/could not load the providers/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled()
+  })
+})
+
+describe('CategoriesPage misspelling warning', () => {
+  it('warns once about a name that is almost an existing one, and saves it when kept', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Sports Medicine')
+
+    await user.click(screen.getByRole('button', { name: /add category/i }))
+    await user.type(await screen.findByRole('textbox'), 'Sports Medincine')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This looks like “Sports Medicine”')
+    expect(api.createCategory).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Save anyway' }))
+    await waitFor(() => expect(api.createCategory).toHaveBeenCalledWith('org1', 'Sports Medincine'))
+  })
+
+  it('warns again if the name is changed to another near miss', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Sports Medicine')
+
+    await user.click(screen.getByRole('button', { name: /add category/i }))
+    const input = await screen.findByRole('textbox')
+    await user.type(input, 'Sports Medincine')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    await screen.findByRole('alert')
+
+    await user.clear(input)
+    await user.type(input, 'Joint Replacment')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This looks like “Joint Replacement”')
+    expect(api.createCategory).not.toHaveBeenCalled()
+  })
+
+  it('saves an ordinary new name straight away', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Sports Medicine')
+
+    await user.click(screen.getByRole('button', { name: /add category/i }))
+    await user.type(await screen.findByRole('textbox'), 'Podiatry')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(api.createCategory).toHaveBeenCalledWith('org1', 'Podiatry'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('does not compare a category with itself when it is edited', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Joint Replacement')
 
     const row = screen.getByText('Joint Replacement').closest('div') as HTMLElement
-    await user.click(within(row).getByRole('button', { name: /archive category/i }))
+    await user.click(within(row).getByRole('button', { name: /edit category/i }))
+    const input = await screen.findByRole('textbox')
+    await user.clear(input)
+    await user.type(input, 'Joint Replacements')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
 
-    // Confirm in the ConfirmDialog rather than assuming the click archives directly.
-    const confirm = await screen.findByRole('button', { name: /^archive$/i })
-    await user.click(confirm)
-
-    await waitFor(() => {
-      expect(api.archiveCategory).toHaveBeenCalledWith('cat2')
-    })
+    await waitFor(() => expect(api.updateCategory).toHaveBeenCalledWith('cat2', 'Joint Replacements'))
   })
 })
