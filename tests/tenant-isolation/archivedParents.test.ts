@@ -109,26 +109,34 @@ describe('archiving a provider\'s last offering at a location', () => {
       normalized_name: 'archive test provider 3',
       category_ids: [],
     })
-    const offeringId = await insert('offerings', {
-      org_id: harness.tenantA.orgId,
-      provider_id: providerId,
-      case_type_id: ids.keptCaseType,
-      location_ids: [ids.location],
-      constraints: {},
-    })
-    const link = 'https://book.example/archive-test'
-    expect((await upsertProviderLocation(providerId, ids.location, link, '4105550100')).error).toBeNull()
+    // The tests above and below count the org's live offerings, and this one
+    // ends with a live offering restored. Deleting the provider takes its
+    // offerings and saved details with it, so it leaves nothing behind.
+    try {
+      const offeringId = await insert('offerings', {
+        org_id: harness.tenantA.orgId,
+        provider_id: providerId,
+        case_type_id: ids.keptCaseType,
+        location_ids: [ids.location],
+        constraints: {},
+      })
+      const link = 'https://book.example/archive-test'
+      expect((await upsertProviderLocation(providerId, ids.location, link, '4105550100')).error).toBeNull()
 
-    expect((await archiveOffering(offeringId)).error).toBeNull()
-    expect(await getProviderLocations(providerId)).toEqual([
-      expect.objectContaining({ location_id: ids.location, booking_link: link, phone: '4105550100' }),
-    ])
+      expect((await archiveOffering(offeringId)).error).toBeNull()
+      expect(await getProviderLocations(providerId)).toEqual([
+        expect.objectContaining({ location_id: ids.location, booking_link: link, phone: '4105550100' }),
+      ])
 
-    expect((await restoreOffering(offeringId)).error).toBeNull()
-    expect(idsOf(await getOfferingsByProvider(providerId))).toEqual([offeringId])
-    expect(await getProviderLocations(providerId)).toEqual([
-      expect.objectContaining({ booking_link: link, phone: '4105550100' }),
-    ])
+      expect((await restoreOffering(offeringId)).error).toBeNull()
+      expect(idsOf(await getOfferingsByProvider(providerId))).toEqual([offeringId])
+      expect(await getProviderLocations(providerId)).toEqual([
+        expect.objectContaining({ booking_link: link, phone: '4105550100' }),
+      ])
+    } finally {
+      const { error } = await harness.service.from('providers').delete().eq('id', providerId)
+      expect(error).toBeNull()
+    }
   })
 })
 
