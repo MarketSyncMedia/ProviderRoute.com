@@ -9,6 +9,7 @@ import {
   updateCategoryOrders,
 } from '../../lib/api/categories'
 import type { Category } from '../../types/database'
+import RemoveCategoryDialog from './RemoveCategoryDialog'
 
 export default function CategoriesPage() {
   return (
@@ -31,7 +32,11 @@ export default function CategoriesPage() {
         singularLower: 'category',
         pluralLower: 'categories',
         emptyDescription: 'Add categories like Sports Medicine, Joint Replacement',
+        removeVerb: 'Remove',
       }}
+      archiveDialog={({ entity, offeringCount, close, refresh }) => (
+        <RemoveCategoryDialog category={entity} offeringCount={offeringCount} close={close} refresh={refresh} />
+      )}
       icon={<Tag className="h-10 w-10" />}
     />
   )

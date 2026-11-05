@@ -10,6 +10,7 @@ import { supabase } from '../../lib/supabase'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import { useToast } from '../ui/toastStore'
 import { parseFile, type ParseResult } from '../../lib/parsers/fileParser'
+import { applyNameFixes, nameFixKey, suggestNameFixes } from '../../lib/similarNames'
 import type { CaseType, Category, Constraint, Location, Provider } from '../../types/database'
 
 export type ColumnRole =
@@ -350,6 +351,34 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     [conflicts]
   )
 
+  // Case types and categories in the file that are almost, but not exactly,
+  // ones the org already has. Without this the import adds each misspelling as
+  // a new entry beside the real one. They are matched by default; unticking
+  // one keeps the file's spelling.
+  const nameFixes = useMemo(() => {
+    if (!parseResult?.rows.length) return []
+    return suggestNameFixes({
+      rows: parseResult.rows,
+      caseTypeHeader: mappings.find((m) => m.role === 'case_type')?.excelHeader,
+      categoryHeader: mappings.find((m) => m.role === 'category')?.excelHeader,
+      existingCaseTypes: orgCaseTypes.map((c) => c.name),
+      existingCategories: orgCategories.map((c) => c.name),
+    })
+  }, [parseResult, mappings, orgCaseTypes, orgCategories])
+  const [skippedNameFixes, setSkippedNameFixes] = useState<Set<string>>(() => new Set())
+  // What is previewed and imported: the file's rows with the matched names
+  // swapped in.
+  const importRows = useMemo(
+    () =>
+      applyNameFixes(
+        parseResult?.rows ?? [],
+        mappings.find((m) => m.role === 'case_type')?.excelHeader,
+        mappings.find((m) => m.role === 'category')?.excelHeader,
+        nameFixes.filter((fix) => !skippedNameFixes.has(nameFixKey(fix))),
+      ),
+    [parseResult, mappings, nameFixes, skippedNameFixes],
+  )
+
   // resolvedConflicts tracks per-row resolutions for the current conflict
   // set — reset it during render when that set changes, rather than from
   // an effect reacting to a value that render-time logic already produced.
@@ -393,8 +422,8 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     const newCatSet = new Set<string>()
     let totalOfferings = 0
 
-    for (let i = 0; i < parseResult.rows.length; i += 1) {
-      const row = parseResult.rows[i]
+    for (let i = 0; i < importRows.length; i += 1) {
+      const row = importRows[i]
       const prov = providerHeader ? (row[providerHeader] ?? '').trim() : ''
       if (!prov) {
         skippedRows += 1
@@ -429,9 +458,17 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         newCtSet.add(caseVal.trim())
       }
 
-      const catVal = categoryHeader ? (row[categoryHeader] ?? '').trim() : ''
-      if (catVal && !orgCatLower.has(catVal.toLowerCase())) {
-        newCatSet.add(catVal.trim())
+      // The import reads a category cell as a comma-separated list.
+      const catVals = categoryHeader
+        ? (row[categoryHeader] ?? '')
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean)
+        : []
+      for (const catVal of catVals) {
+        if (!orgCatLower.has(catVal.toLowerCase())) {
+          newCatSet.add(catVal.toLowerCase())
+        }
       }
 
       totalOfferings += 1
@@ -445,7 +482,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
       newCategories: newCatSet.size,
       totalOfferings,
     }
-  }, [parseResult, mappings, conflicts, resolvedConflicts, orgCaseTypes, orgCategories])
+  }, [parseResult, importRows, mappings, conflicts, resolvedConflicts, orgCaseTypes, orgCategories])
 
   const previewWarnings = useMemo(() => {
     if (!parseResult?.rows.length) {
@@ -524,7 +561,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         orgId,
         filename: file.name,
         headers: parseResult.headers,
-        rows: parseResult.rows,
+        rows: importRows,
         mappings,
         orgConstraints,
         orgCaseTypes,
@@ -547,6 +584,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     }
   }, [
     parseResult,
+    importRows,
     file,
     orgId,
     mappings,
@@ -1228,9 +1266,11 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
           {step === 3 ? (
             <div>
               {conflicts.length === 0 ? (
-                <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-6 text-center">
-                  <p className="font-medium text-green-900">No duplicates detected. Ready to import!</p>
-                </div>
+                nameFixes.length === 0 ? (
+                  <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-6 text-center">
+                    <p className="font-medium text-green-900">No duplicates detected. Ready to import!</p>
+                  </div>
+                ) : null
               ) : (
                 <div>
                   <h3 className="mb-2 text-lg font-semibold text-slate-900">
@@ -1340,6 +1380,45 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                   </div>
                 </div>
               )}
+              {nameFixes.length > 0 ? (
+                <div className={conflicts.length > 0 ? 'mt-6' : ''}>
+                  <h3 className="mb-1 text-lg font-semibold text-slate-900">These names look misspelled</h3>
+                  <p className="mb-3 text-sm text-slate-600">
+                    Each is almost the same as one you already have. Matching them keeps one clean list instead of
+                    adding a near-duplicate beside the real one.
+                  </p>
+                  <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    {nameFixes.map((fix) => {
+                      const key = nameFixKey(fix)
+                      return (
+                        <li key={key} className="px-3 py-2 text-sm">
+                          <label className="flex cursor-pointer items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={!skippedNameFixes.has(key)}
+                              onChange={(e) =>
+                                setSkippedNameFixes((prev) => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.delete(key)
+                                  else next.add(key)
+                                  return next
+                                })
+                              }
+                            />
+                            <span>
+                              Treat <span className="font-medium text-slate-900">“{fix.incoming}”</span> as{' '}
+                              <span className="font-medium text-slate-900">“{fix.suggested}”</span>
+                              <span className="ml-2 text-xs text-slate-500">
+                                {fix.kind === 'caseType' ? 'Case type' : 'Category'}
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {step === 4 && parseResult ? (
