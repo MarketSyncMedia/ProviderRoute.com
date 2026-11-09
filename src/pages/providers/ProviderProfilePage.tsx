@@ -44,6 +44,7 @@ import { getCategories } from '../../lib/api/categories'
 import { getConstraints } from '../../lib/api/constraints'
 import { getLocations } from '../../lib/api/locations'
 import { constraintSummary } from '../../lib/constraintSummary'
+import { formatPhone } from '../../lib/phone'
 import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../shared/avatarPalette'
 import { readableTextColor } from '../../shared/colorContrast'
@@ -204,7 +205,7 @@ export default function ProviderProfilePage() {
     const nextPhone: Record<string, string> = {}
     providerLocationsData.forEach((entry) => {
       nextBooking[entry.location_id] = entry.booking_link ?? ''
-      nextPhone[entry.location_id] = entry.phone ?? ''
+      nextPhone[entry.location_id] = formatPhone(entry.phone)
     })
     setSyncedProviderLocations(providerLocationsData)
     setBookingLinks(nextBooking)
@@ -268,7 +269,7 @@ export default function ProviderProfilePage() {
   const phoneLinkBaselineByLocationId = useMemo(() => {
     const map = new Map<string, string>()
     providerLocations.forEach((entry) => {
-      map.set(entry.location_id, (entry.phone ?? '').trim())
+      map.set(entry.location_id, formatPhone(entry.phone))
     })
     return map
   }, [providerLocations])
@@ -308,7 +309,7 @@ export default function ProviderProfilePage() {
 
   const hasPhoneLinkChanges = useMemo(() => {
     return offeringLocationIds.some((locationId) => {
-      const current = (phoneLinks[locationId] ?? '').trim()
+      const current = formatPhone(phoneLinks[locationId])
       const baseline = phoneLinkBaselineByLocationId.get(locationId) ?? ''
       return current !== baseline
     })
@@ -344,7 +345,7 @@ export default function ProviderProfilePage() {
 
     for (const locationId of offeringLocationIds) {
       const link = bookingLinks[locationId]?.trim() ?? ''
-      const phone = phoneLinks[locationId]?.trim() ?? ''
+      const phone = formatPhone(phoneLinks[locationId])
       const saveResult = await upsertProviderLocation(id, locationId, link || null, phone || null)
       if (saveResult.error) {
         toast.error(saveResult.error)
@@ -671,10 +672,6 @@ export default function ProviderProfilePage() {
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-3 font-semibold text-slate-900">Booking Behavior</h2>
-        <ul className="mb-4 space-y-1 text-sm text-slate-500">
-          <li><span className="font-medium text-slate-700">Simple</span> — Provider uses the same booking link or phone number at every location</li>
-          <li><span className="font-medium text-slate-700">Advanced</span> — Provider has different booking links or phone numbers depending on location</li>
-        </ul>
         <div className="flex gap-6">
           <div className="flex-1">
             <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">Booking Link Mode</label>

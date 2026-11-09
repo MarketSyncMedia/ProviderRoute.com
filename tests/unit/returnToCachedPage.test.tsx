@@ -188,7 +188,8 @@ describe('returning to a page with cached data', () => {
 
     // The blank form this replaces had Save enabled, ready to overwrite these.
     expect(await screen.findByDisplayValue('https://book.example/clough')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('4105550100')).toBeInTheDocument()
+    // Phones are shown one way; the stored digits are not a change to save.
+    expect(screen.getByDisplayValue('(410) 555-0100')).toBeInTheDocument()
     expect(screen.getByText('Sports Medicine')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
     const modes = screen.getAllByRole('combobox').map((select) => (select as HTMLSelectElement).value)
