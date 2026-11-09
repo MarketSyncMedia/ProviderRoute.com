@@ -49,6 +49,7 @@ import {
 import { useAuthStore } from '../../stores/authStore'
 import type { CaseType, Constraint, Location, Question } from '../../types/database'
 import { toJson } from '../../lib/schemaEnums'
+import ArchivedQuestions from './ArchivedQuestions'
 
 const EMPTY_QUESTIONS: Question[] = []
 
@@ -1537,10 +1538,12 @@ export default function QuestionsPage() {
         </div>
       ) : null}
 
+      <ArchivedQuestions />
+
       <ConfirmDialog
         isOpen={modal.type === 'archive'}
         title="Archive Question"
-        message="Archive this question? The widget will stop asking it."
+        message="Archive this question? The widget will stop asking it. Restore it from Archived questions."
         confirmLabel="Archive"
         confirmVariant="danger"
         isLoading={archiveLoading}

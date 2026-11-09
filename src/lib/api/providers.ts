@@ -76,6 +76,27 @@ export async function archiveProvider(id: string): Promise<{ error: string | nul
   return { error: error?.message ?? null }
 }
 
+export async function getArchivedProviders(orgId: string): Promise<Provider[]> {
+  const { data, error } = await supabase
+    .from('providers')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('is_archived', true)
+    .order('name', { ascending: true })
+
+  if (error || !data) {
+    return []
+  }
+
+  return data as Provider[]
+}
+
+/** Brings a provider back with everything that was kept when they were archived. */
+export async function restoreProvider(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('providers').update({ is_archived: false }).eq('id', id)
+  return { error: error?.message ?? null }
+}
+
 export async function uploadProviderImage(
   providerId: string,
   orgId: string,

@@ -293,7 +293,9 @@ export default function ProviderProfilePage() {
         }
       })
     })
-    const ids = Array.from(set)
+    // An archived location stays on the offering (restoring it brings it back)
+    // but has nothing to manage here.
+    const ids = Array.from(set).filter((locationId) => locationNameById.has(locationId))
     ids.sort((a, b) => (locationNameById.get(a) ?? '').localeCompare(locationNameById.get(b) ?? ''))
     return ids
   }, [offerings, locationNameById])
@@ -971,7 +973,7 @@ export default function ProviderProfilePage() {
     <ConfirmDialog
       isOpen={modal.type === 'archive-provider'}
       title="Archive Provider"
-      message="Archive this provider? They will be hidden from all widgets."
+      message="Archive this provider? They will be hidden from the widget and the data table. Restore them from Archived providers on the Providers page."
       confirmLabel="Archive"
       confirmVariant="danger"
       onConfirm={handleArchive}

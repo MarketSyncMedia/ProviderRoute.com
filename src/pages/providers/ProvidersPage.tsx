@@ -7,6 +7,7 @@ import ImportWizard from '../../components/import/ImportWizard'
 import EmptyState from '../../components/ui/EmptyState'
 import { useToast } from '../../components/ui/toastStore'
 import { getCategories } from '../../lib/api/categories'
+import ArchivedProviders from './ArchivedProviders'
 import { getProviders, createProvider } from '../../lib/api/providers'
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../shared/avatarPalette'
 import { readableTextColor } from '../../shared/colorContrast'
@@ -226,6 +227,8 @@ export default function ProvidersPage() {
           })}
         </div>
       )}
+
+      <ArchivedProviders />
 
       {modal.type === 'add' ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
