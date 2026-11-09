@@ -358,10 +358,6 @@ export default function SettingsPage() {
 
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Default Booking Mode</label>
-            <ul className="mb-2 space-y-1 text-xs text-slate-500">
-              <li><span className="font-medium text-slate-600">Simple</span> — Provider uses the same booking link at every location</li>
-              <li><span className="font-medium text-slate-600">Advanced</span> — Provider has different booking links per location</li>
-            </ul>
             <select
               {...register('default_booking_mode')}
               className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -372,10 +368,6 @@ export default function SettingsPage() {
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Default Phone Mode</label>
-            <ul className="mb-2 space-y-1 text-xs text-slate-500">
-              <li><span className="font-medium text-slate-600">Simple</span> — Provider uses the same phone number at every location</li>
-              <li><span className="font-medium text-slate-600">Advanced</span> — Provider has different phone numbers per location</li>
-            </ul>
             <select
               {...register('default_phone_mode')}
               className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"

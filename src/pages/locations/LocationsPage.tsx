@@ -11,6 +11,7 @@ import {
   getLocations,
   updateLocation,
 } from '../../lib/api/locations'
+import { formatPhone } from '../../lib/phone'
 import { useAuthStore } from '../../stores/authStore'
 import type { Location } from '../../types/database'
 import ArchivedLocations from './ArchivedLocations'
@@ -95,7 +96,7 @@ export default function LocationsPage() {
     setForm({
       name: target.name,
       address: target.address ?? '',
-      phone: target.phone ?? '',
+      phone: formatPhone(target.phone),
       directions_url: target.directions_url ?? '',
     })
     setFormError('')
@@ -130,7 +131,7 @@ export default function LocationsPage() {
         org_id: orgId,
         name: form.name.trim(),
         address: form.address.trim() || undefined,
-        phone: form.phone.trim() || undefined,
+        phone: formatPhone(form.phone) || undefined,
         directions_url: form.directions_url.trim() || undefined,
       })
       setSaveLoading(false)
@@ -149,7 +150,7 @@ export default function LocationsPage() {
       const { error } = await updateLocation(modal.payload.id, {
         name: form.name.trim(),
         address: form.address.trim() || null,
-        phone: form.phone.trim() || null,
+        phone: formatPhone(form.phone) || null,
         directions_url: form.directions_url.trim() || null,
       })
       setSaveLoading(false)
@@ -235,7 +236,7 @@ export default function LocationsPage() {
                   <td className="px-4 py-3 text-sm text-slate-500" title={location.address ?? ''}>
                     <div className="max-w-[14rem] truncate xl:max-w-xs">{location.address ?? '—'}</div>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">{location.phone ?? '—'}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">{formatPhone(location.phone) || '—'}</td>
                   <td className="px-4 py-3">
                     <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
                       {offeringCount}

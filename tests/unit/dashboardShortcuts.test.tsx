@@ -68,6 +68,26 @@ function renderApp() {
   )
 }
 
+describe('dashboard count tiles', () => {
+  it('each go to the page they count', async () => {
+    useAuthStore.setState({
+      org: { id: 'org1', name: 'TOA' } as never,
+      user: { id: 'u1', name: 'Liam', email: 'l@example.com' } as never,
+    })
+    renderApp()
+
+    for (const [label, path] of [
+      ['Providers', '/providers'],
+      ['Locations', '/locations'],
+      ['Case Types', '/case-types'],
+      ['Widgets', '/widgets'],
+    ]) {
+      const link = (await screen.findByText(label, { selector: 'p' })).closest('a')
+      expect(link).toHaveAttribute('href', path)
+    }
+  })
+})
+
 describe('dashboard quick actions', () => {
   beforeEach(() => {
     lastState = 'unset'
