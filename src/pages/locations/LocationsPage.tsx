@@ -11,8 +11,10 @@ import {
   getLocations,
   updateLocation,
 } from '../../lib/api/locations'
+import { formatPhone } from '../../lib/phone'
 import { useAuthStore } from '../../stores/authStore'
 import type { Location } from '../../types/database'
+import ArchivedLocations from './ArchivedLocations'
 
 interface LocationForm {
   name: string
@@ -94,7 +96,7 @@ export default function LocationsPage() {
     setForm({
       name: target.name,
       address: target.address ?? '',
-      phone: target.phone ?? '',
+      phone: formatPhone(target.phone),
       directions_url: target.directions_url ?? '',
     })
     setFormError('')
@@ -129,7 +131,7 @@ export default function LocationsPage() {
         org_id: orgId,
         name: form.name.trim(),
         address: form.address.trim() || undefined,
-        phone: form.phone.trim() || undefined,
+        phone: formatPhone(form.phone) || undefined,
         directions_url: form.directions_url.trim() || undefined,
       })
       setSaveLoading(false)
@@ -148,7 +150,7 @@ export default function LocationsPage() {
       const { error } = await updateLocation(modal.payload.id, {
         name: form.name.trim(),
         address: form.address.trim() || null,
-        phone: form.phone.trim() || null,
+        phone: formatPhone(form.phone) || null,
         directions_url: form.directions_url.trim() || null,
       })
       setSaveLoading(false)
@@ -169,7 +171,7 @@ export default function LocationsPage() {
     }
     const { id } = modal.payload
     setArchiveLoading(true)
-    const { error } = await archiveLocation(id, orgId)
+    const { error } = await archiveLocation(id)
     setArchiveLoading(false)
     if (error) {
       toast.error(error)
@@ -234,7 +236,7 @@ export default function LocationsPage() {
                   <td className="px-4 py-3 text-sm text-slate-500" title={location.address ?? ''}>
                     <div className="max-w-[14rem] truncate xl:max-w-xs">{location.address ?? '—'}</div>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">{location.phone ?? '—'}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">{formatPhone(location.phone) || '—'}</td>
                   <td className="px-4 py-3">
                     <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
                       {offeringCount}
@@ -266,6 +268,8 @@ export default function LocationsPage() {
           </table>
         </div>
       )}
+
+      <ArchivedLocations />
 
       {modal.type === 'add' || modal.type === 'edit' ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -350,7 +354,7 @@ export default function LocationsPage() {
         title="Archive Location"
         message={
           modal.type === 'archive' && modal.payload
-            ? `Archive ${modal.payload.name}? This will remove it from ${archiveOfferingCount} offerings and all provider assignments.`
+            ? `Archive ${modal.payload.name}? It is used in ${archiveOfferingCount} ${archiveOfferingCount === 1 ? 'offering' : 'offerings'}, which stop being offered there. Restore it from Archived locations to bring them back.`
             : ''
         }
         confirmLabel="Archive"

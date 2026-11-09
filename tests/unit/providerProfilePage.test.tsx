@@ -73,7 +73,9 @@ vi.mock('../../src/lib/supabase', () => ({
         data:
           table === 'constraints'
             ? [{ id: 'c1', name: 'Accepts Medicare', type: 'binary', mapped_key: 'medicare', sort_order: 0 }]
-            : [],
+            : table === 'locations'
+              ? [{ id: 'l1', name: 'Towson', sort_order: 0 }]
+              : [],
         error: null,
       }),
     ),
@@ -183,6 +185,28 @@ describe('ProviderProfilePage offerings', () => {
 
     expect(await screen.findByText('Accepts Medicare')).toBeInTheDocument()
     expect(screen.queryByText(/medicare: 1/)).not.toBeInTheDocument()
+  })
+
+  it('manages booking details only at live locations, not archived ones the offering still lists', async () => {
+    offeringsApi.getOfferingsByProvider.mockResolvedValue([
+      {
+        id: 'o1',
+        provider_id: 'p1',
+        org_id: 'org1',
+        case_type_id: 'ct1',
+        location_ids: ['l1', 'l-archived'],
+        constraints: {},
+        is_archived: false,
+      },
+    ])
+    providerLocationsApi.getProviderLocations.mockResolvedValue([
+      { provider_id: 'p1', location_id: 'l1', booking_link: 'https://book.example/towson', phone: null },
+      { provider_id: 'p1', location_id: 'l-archived', booking_link: 'https://book.example/old', phone: null },
+    ])
+    renderPage()
+
+    expect(await screen.findByDisplayValue('https://book.example/towson')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('https://book.example/old')).not.toBeInTheDocument()
   })
 
   it('archives an offering under that name and reports a failure', async () => {
