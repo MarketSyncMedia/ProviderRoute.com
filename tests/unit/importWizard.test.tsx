@@ -19,6 +19,7 @@ const orgApi = vi.hoisted(() => ({
   getLocations: vi.fn(),
   getConstraints: vi.fn(),
   getProviders: vi.fn(),
+  getArchivedProviders: vi.fn(),
   getCaseTypes: vi.fn(),
   getCategories: vi.fn(),
 }))
@@ -32,7 +33,10 @@ vi.mock('../../src/lib/import/importExecution', async (importOriginal) => {
 })
 vi.mock('../../src/lib/api/locations', () => ({ getLocations: orgApi.getLocations }))
 vi.mock('../../src/lib/api/constraints', () => ({ getConstraints: orgApi.getConstraints }))
-vi.mock('../../src/lib/api/providers', () => ({ getProviders: orgApi.getProviders }))
+vi.mock('../../src/lib/api/providers', () => ({
+  getProviders: orgApi.getProviders,
+  getArchivedProviders: orgApi.getArchivedProviders,
+}))
 vi.mock('../../src/lib/api/caseTypes', () => ({ getCaseTypes: orgApi.getCaseTypes }))
 vi.mock('../../src/lib/api/categories', () => ({ getCategories: orgApi.getCategories }))
 vi.mock('../../src/components/ui/toastStore', () => ({
@@ -92,6 +96,7 @@ beforeEach(() => {
   orgApi.getCaseTypes.mockResolvedValue([])
   orgApi.getCategories.mockResolvedValue([])
   orgApi.getProviders.mockResolvedValue([existing])
+  orgApi.getArchivedProviders.mockResolvedValue([])
   exec.executeImportRun.mockResolvedValue({
     providersCreated: 0,
     providersUpdated: 1,
@@ -210,5 +215,102 @@ describe('ImportWizard misspelled names', () => {
     const passed = await runImport(user)
 
     expect(passed.rows[0]).toMatchObject({ 'Case type': 'Shoulder', category: 'Sports Medincine, Podiatry' })
+  })
+})
+
+describe('ImportWizard archived providers', () => {
+  it('matches a row to an archived provider and merges by restoring them', async () => {
+    orgApi.getProviders.mockResolvedValue([])
+    orgApi.getArchivedProviders.mockResolvedValue([{ ...existing, id: 'archived-p1', is_archived: true }])
+    const user = userEvent.setup()
+    renderWizard()
+    await waitFor(() => expect(orgApi.getArchivedProviders).toHaveBeenCalled())
+
+    await uploadFile(user)
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await mapColumn(user, 'provider', 'Provider Name')
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+
+    // Without this the row would create a second Dr. Jane Smith beside the archived one.
+    expect(await screen.findByText('Archived')).toBeInTheDocument()
+    await user.click(screen.getByRole('radio', { name: /merge \(restore and update\)/i }))
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await user.click(await screen.findByRole('button', { name: /import|confirm|run/i }))
+    await waitFor(() => expect(exec.executeImportRun).toHaveBeenCalled())
+
+    const passed = exec.executeImportRun.mock.calls[0][0]
+    expect(passed.conflicts[0].existingProvider).toMatchObject({ id: 'archived-p1', is_archived: true })
+    expect(passed.resolvedConflicts['0']).toBe('merge')
+  })
+
+  it('prefers a live provider over an archived one with the same name', async () => {
+    orgApi.getArchivedProviders.mockResolvedValue([{ ...existing, id: 'archived-p1', is_archived: true }])
+    const user = userEvent.setup()
+    renderWizard()
+    await waitFor(() => expect(orgApi.getArchivedProviders).toHaveBeenCalled())
+
+    await uploadFile(user)
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await mapColumn(user, 'provider', 'Provider Name')
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+
+    await user.click(await screen.findByRole('radio', { name: /^Merge \(update existing\)/i }))
+    expect(screen.queryByText('Archived')).not.toBeInTheDocument()
+  })
+})
+
+describe('ImportWizard the same person twice in one file', () => {
+  const rows = [
+    { provider: 'Dr. Jeffery T. Brodie', 'Case type': 'Knee' },
+    { provider: 'Someone Else', 'Case type': 'Hip' },
+    { provider: 'Brodie, Jeffery T.', 'Case type': 'Hip' },
+  ]
+
+  beforeEach(() => {
+    parse.parseFile.mockResolvedValue({ headers: HEADERS, rows, errors: [], rowCount: rows.length })
+    orgApi.getProviders.mockResolvedValue([])
+  })
+
+  async function toNamesStep(user: ReturnType<typeof userEvent.setup>) {
+    renderWizard()
+    await waitFor(() => expect(orgApi.getProviders).toHaveBeenCalled())
+    await uploadFile(user)
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await mapColumn(user, 'provider', 'Provider Name')
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await screen.findByText('These names look misspelled')
+  }
+
+  async function runImport(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await user.click(await screen.findByRole('button', { name: /import|confirm|run/i }))
+    await waitFor(() => expect(exec.executeImportRun).toHaveBeenCalled())
+    return exec.executeImportRun.mock.calls[0][0]
+  }
+
+  it('offers to treat the later spelling as the first, and imports them as one provider', async () => {
+    const user = userEvent.setup()
+    await toNamesStep(user)
+
+    expect(screen.getByRole('checkbox', { name: /“Brodie, Jeffery T\.”.*“Dr\. Jeffery T\. Brodie”/ })).toBeChecked()
+    expect(screen.getByText('Provider, earlier in this file')).toBeInTheDocument()
+
+    const passed = await runImport(user)
+
+    expect(passed.rows.map((r: Record<string, string>) => r.provider)).toEqual([
+      'Dr. Jeffery T. Brodie',
+      'Someone Else',
+      'Dr. Jeffery T. Brodie',
+    ])
+  })
+
+  it('keeps them separate when the admin unticks it', async () => {
+    const user = userEvent.setup()
+    await toNamesStep(user)
+
+    await user.click(screen.getByRole('checkbox', { name: /“Brodie, Jeffery T\.”/ }))
+    const passed = await runImport(user)
+
+    expect(passed.rows[2].provider).toBe('Brodie, Jeffery T.')
   })
 })

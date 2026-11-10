@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { applyNameFixes, findSimilarName, nameFixKey, suggestNameFixes } from '../../src/lib/similarNames'
+import {
+  applyNameFixes,
+  findSimilarName,
+  nameFixKey,
+  suggestNameFixes,
+  suggestProviderNameFixes,
+} from '../../src/lib/similarNames'
 
 describe('findSimilarName', () => {
   const existing = ['Sports Medicine', 'Joint Replacement', 'Hand & Upper Extremity Specialist']
@@ -97,5 +103,41 @@ describe('applyNameFixes', () => {
 
   it('keys a fix by kind and trimmed, lower-cased name', () => {
     expect(nameFixKey({ kind: 'category', incoming: ' Sports Medincine ' })).toBe('category:sports medincine')
+  })
+})
+
+describe('suggestProviderNameFixes', () => {
+  const rows = (...names: string[]) => names.map((name) => ({ Provider: name }))
+
+  it('pairs a later spelling of the same person with the first one in the file', () => {
+    expect(
+      suggestProviderNameFixes(rows('Dr. Jeffery T. Brodie', 'Sarah Hobart', 'Brodie, Jeffery T.', 'Sarah Hobart MD'), 'Provider'),
+    ).toEqual([
+      expect.objectContaining({ kind: 'provider', incoming: 'Brodie, Jeffery T.', suggested: 'Dr. Jeffery T. Brodie' }),
+      expect.objectContaining({ kind: 'provider', incoming: 'Sarah Hobart MD', suggested: 'Sarah Hobart' }),
+    ])
+  })
+
+  it('leaves a name the import already reads as one person, and reports each spelling once', () => {
+    expect(suggestProviderNameFixes(rows('Dr. Smith', 'dr smith', 'DR. SMITH'), 'Provider')).toEqual([])
+    expect(
+      suggestProviderNameFixes(rows('Jeffery T. Brodie', 'Brodie, Jeffery T.', 'Brodie, Jeffery T.'), 'Provider'),
+    ).toHaveLength(1)
+  })
+
+  it('leaves different people alone, and blanks', () => {
+    expect(suggestProviderNameFixes(rows('Mark Clough', 'Michael Brodie', '', '  '), 'Provider')).toEqual([])
+  })
+
+  it('is applied to the provider column', () => {
+    const fixes = suggestProviderNameFixes(rows('Jeffery T. Brodie', 'Brodie, Jeffery T.'), 'Provider')
+    const input = [
+      { Provider: 'Jeffery T. Brodie', Case: 'Knee' },
+      { Provider: 'Brodie, Jeffery T.', Case: 'Hip' },
+    ]
+    expect(applyNameFixes(input, undefined, undefined, fixes, 'Provider')).toEqual([
+      { Provider: 'Jeffery T. Brodie', Case: 'Knee' },
+      { Provider: 'Jeffery T. Brodie', Case: 'Hip' },
+    ])
   })
 })
