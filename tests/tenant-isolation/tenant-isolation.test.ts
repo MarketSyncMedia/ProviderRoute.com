@@ -713,6 +713,84 @@ describe('tenant isolation (staging Supabase RLS)', () => {
     })
   })
 
+  describe('10d. case types placed on the body map by an admin', () => {
+    const position = { map_view: 'front', map_x: 45, map_y: 27.5 }
+
+    async function newCaseType(label: string, extra: Record<string, unknown> = {}) {
+      const { tenantA, runId } = harness
+      return tenantA.client
+        .from('case_types')
+        .insert({ org_id: tenantA.orgId, name: `Placed ${label} ${runId}`, ...extra })
+        .select('id, map_tag, map_view, map_x, map_y, map_label_x, map_label_y')
+        .single()
+    }
+
+    it('stores a position with or without a label, and reads it back as numbers', async () => {
+      const plain = await newCaseType('plain', position)
+      expect(plain.error).toBeNull()
+      expect(plain.data).toMatchObject({ map_view: 'front', map_x: 45, map_y: 27.5, map_label_x: null, map_label_y: null })
+
+      const labelled = await newCaseType('labelled', { ...position, map_view: 'back', map_label_x: -12.5, map_label_y: 130 })
+      expect(labelled.error).toBeNull()
+      expect(labelled.data).toMatchObject({ map_view: 'back', map_label_x: -12.5, map_label_y: 130 })
+    })
+
+    it('leaves case types with no position as they were', async () => {
+      const { data, error } = await newCaseType('none')
+      expect(error).toBeNull()
+      expect(data).toMatchObject({ map_view: null, map_x: null, map_y: null, map_label_x: null, map_label_y: null })
+    })
+
+    it('never holds both a built-in spot and its own position', async () => {
+      const { error } = await newCaseType('both', { ...position, map_tag: 'knee' })
+      expect(error).not.toBeNull()
+    })
+
+    it('rejects a position that is incomplete', async () => {
+      expect((await newCaseType('no-view', { map_x: 1, map_y: 2 })).error).not.toBeNull()
+      expect((await newCaseType('no-y', { map_view: 'front', map_x: 1 })).error).not.toBeNull()
+      expect((await newCaseType('half-label', { ...position, map_label_x: 5 })).error).not.toBeNull()
+      expect((await newCaseType('label-only', { map_label_x: 5, map_label_y: 5 })).error).not.toBeNull()
+    })
+
+    it('rejects a dot off the figure, a label off the drawing, and an unknown view', async () => {
+      expect((await newCaseType('x-high', { ...position, map_x: 100.5 })).error).not.toBeNull()
+      expect((await newCaseType('y-low', { ...position, map_y: -1 })).error).not.toBeNull()
+      expect((await newCaseType('label-far', { ...position, map_label_x: 141, map_label_y: 0 })).error).not.toBeNull()
+      expect((await newCaseType('side', { ...position, map_view: 'side' })).error).not.toBeNull()
+    })
+
+    it('lets two case types sit at the same place, since a position is not a shared slot', async () => {
+      expect((await newCaseType('twin-a', position)).error).toBeNull()
+      expect((await newCaseType('twin-b', position)).error).toBeNull()
+    })
+
+    it('can move a case type from a built-in spot to its own position, and back', async () => {
+      const { tenantA } = harness
+      const made = await newCaseType('swap')
+      const id = made.data!.id
+      const own = await tenantA.client
+        .from('case_types')
+        .update({ map_tag: null, ...position })
+        .eq('id', id)
+        .select('map_tag, map_view')
+        .single()
+      expect(own.error).toBeNull()
+      expect(own.data).toMatchObject({ map_tag: null, map_view: 'front' })
+
+      const builtIn = await tenantA.client
+        .from('case_types')
+        .update({ map_tag: 'pelvis', map_view: null, map_x: null, map_y: null, map_label_x: null, map_label_y: null })
+        .eq('id', id)
+        .select('map_tag, map_view')
+        .single()
+      expect(builtIn.error).toBeNull()
+      expect(builtIn.data).toMatchObject({ map_tag: 'pelvis', map_view: null })
+      // Leave the shared spot free for the other sections.
+      await tenantA.client.from('case_types').update({ map_tag: null }).eq('id', id)
+    })
+  })
+
   describe('11. live widget publication requirements', () => {
     const PRIVACY_URL = 'https://example.invalid/privacy'
     const DISCLAIMER = 'Informational only, not medical advice.'

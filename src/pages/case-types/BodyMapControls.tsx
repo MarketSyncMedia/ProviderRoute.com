@@ -2,42 +2,46 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { MapPin, Sparkles, X } from 'lucide-react'
 import { useToast } from '../../components/ui/toastStore'
-import { getCaseTypes, updateCaseTypeMapTag } from '../../lib/api/caseTypes'
+import { getCaseTypes, updateCaseTypeMapPosition, updateCaseTypeMapTag } from '../../lib/api/caseTypes'
 import {
   BODY_MAP_SPOTS,
   bodyMapSpot,
+  framePoint,
+  placementOf,
+  resolveSpot,
   suggestMapTags,
   type BodyMapSpot,
   type MapTagSuggestion,
 } from '../../shared/bodyMap'
-import { OUTLINE_PATH, OUTLINE_SIZE, VIEW_FRAMES } from '../../shared/bodyOutline'
+import { OUTLINE_PATH, OUTLINE_SIZE } from '../../shared/bodyOutline'
 import { useAuthStore } from '../../stores/authStore'
 import type { CaseType } from '../../types/database'
+import { PlaceOnMapDialog } from './PlaceOnMapDialog'
 import { useInvalidateCaseTypes } from './useInvalidateCaseTypes'
 
 /**
  * The case types page's body map section: which case type each spot on the
- * widget's body map selects. A case type with no spot still appears in the
- * widget, as a plain button under the map.
+ * widget's body map selects, and where case types without a built-in spot sit
+ * (placed by the admin). A case type with no spot still appears in the widget,
+ * as a plain button under the map.
  */
 
 /** A spot's centre in outline coordinates -- the same sum the widget does. */
 function spotPoint(spot: BodyMapSpot) {
-  const frame = VIEW_FRAMES[spot.view]
-  return { x: frame.x + (spot.x / 100) * frame.width, y: frame.y + (spot.y / 100) * frame.height }
+  return framePoint(spot.view, spot.x, spot.y)
 }
 
 /** Read-only marker in a case type's list row; the section below changes it. */
 export function MapSpotBadge({ caseType }: { caseType: CaseType }) {
-  const spot = bodyMapSpot(caseType.map_tag)
+  const spot = resolveSpot(caseType)
   if (!spot) return null
   return (
     <span
-      title={`On the body map at ${spot.label}`}
+      title={spot.custom ? 'On the body map at a spot you placed' : `On the body map at ${spot.label}`}
       className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
     >
       <MapPin className="h-3 w-3" />
-      {spot.label}
+      {spot.custom ? 'Body map' : spot.label}
     </span>
   )
 }
@@ -45,10 +49,12 @@ export function MapSpotBadge({ caseType }: { caseType: CaseType }) {
 /** The figure with every spot, filled where a case type is linked. */
 function BodyMapPreview({
   holders,
+  customs,
   active,
   onPick,
 }: {
   holders: Map<string, CaseType>
+  customs: CaseType[]
   active: string | null
   onPick: (tag: string) => void
 }) {
@@ -56,7 +62,9 @@ function BodyMapPreview({
     <svg
       viewBox={`0 0 ${OUTLINE_SIZE} ${OUTLINE_SIZE}`}
       role="img"
-      aria-label={`Body map preview, ${holders.size} of ${BODY_MAP_SPOTS.length} spots linked`}
+      aria-label={`Body map preview, ${holders.size} of ${BODY_MAP_SPOTS.length} spots linked${
+        customs.length > 0 ? `, plus ${customs.length} you placed` : ''
+      }`}
       className="w-full"
     >
       <path d={OUTLINE_PATH} fillRule="evenodd" className="fill-slate-300" />
@@ -77,7 +85,63 @@ function BodyMapPreview({
           </g>
         )
       })}
+      {customs.map((ct) => {
+        const spot = resolveSpot(ct)
+        if (!spot) return null
+        const { x, y } = spotPoint(spot)
+        return (
+          <g key={ct.id} data-custom-spot={ct.id}>
+            <title>{`${ct.name}: placed by you`}</title>
+            <circle cx={x} cy={y} r={20} strokeWidth={6} className="fill-emerald-600 stroke-white" />
+          </g>
+        )
+      })}
     </svg>
+  )
+}
+
+/** A case type the admin placed by hand: where it is, with a way to move or remove it. */
+function CustomSpotRow({ caseType, onMove }: { caseType: CaseType; onMove: () => void }) {
+  const { toast } = useToast()
+  const invalidate = useInvalidateCaseTypes()
+  const [saving, setSaving] = useState(false)
+
+  async function remove() {
+    setSaving(true)
+    const { error } = await updateCaseTypeMapPosition(caseType.id, null)
+    setSaving(false)
+    await invalidate()
+    if (error) {
+      toast.error(error)
+      return
+    }
+    toast.success(`${caseType.name} removed from the body map`)
+  }
+
+  return (
+    <li className="flex items-center gap-2 rounded-lg px-2 py-1.5" data-custom-row={caseType.id}>
+      <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-600" />
+      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{caseType.name}</span>
+      <button
+        type="button"
+        onClick={onMove}
+        disabled={saving}
+        aria-label={`Move ${caseType.name} on the body map`}
+        className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+      >
+        Move
+      </button>
+      <button
+        type="button"
+        aria-label={`Remove ${caseType.name} from the body map`}
+        title="Remove from the body map"
+        disabled={saving}
+        onClick={() => void remove()}
+        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </li>
   )
 }
 
@@ -167,6 +231,7 @@ function SpotRow({
 export function BodyMapSection() {
   const orgId = useAuthStore((s) => s.org?.id ?? '')
   const [active, setActive] = useState<string | null>(null)
+  const [placing, setPlacing] = useState<string | null>(null)
   // The plain list, shared with the other pages that read CaseType[]; the
   // list above invalidates it after every add, rename, reorder or archive.
   const { data: caseTypes = [] } = useQuery({
@@ -180,7 +245,10 @@ export function BodyMapSection() {
   const holders = new Map(
     caseTypes.filter((ct) => bodyMapSpot(ct.map_tag)).map((ct) => [ct.map_tag as string, ct]),
   )
-  const offMap = caseTypes.filter((ct) => !bodyMapSpot(ct.map_tag))
+  // Case types the admin placed themselves, and the ones with no spot at all.
+  const customs = caseTypes.filter((ct) => !bodyMapSpot(ct.map_tag) && placementOf(ct))
+  const offMap = caseTypes.filter((ct) => !bodyMapSpot(ct.map_tag) && !placementOf(ct))
+  const placingCaseType = caseTypes.find((ct) => ct.id === placing)
 
   function pick(tag: string) {
     setActive(tag)
@@ -195,9 +263,9 @@ export function BodyMapSection() {
             Body map
           </h2>
           <p className="mt-1 max-w-xl text-sm text-slate-500">
-            Choose which case type each spot on the widget&apos;s body map opens. Removing a spot only takes it off
-            the figure; the case type still shows as a button under it. To hide a case type everywhere, archive it
-            above.
+            Choose which case type each spot on the widget&apos;s body map opens. A case type with no spot of its own
+            can be placed anywhere on the figure. Removing one only takes it off the figure; the case type still shows
+            as a button under it. To hide a case type everywhere, archive it above.
           </p>
         </div>
         <SuggestMapTagsButton all={caseTypes} />
@@ -205,9 +273,10 @@ export function BodyMapSection() {
 
       <div className="grid gap-6 md:grid-cols-[minmax(0,240px)_1fr]">
         <div className="mx-auto w-full max-w-[240px]">
-          <BodyMapPreview holders={holders} active={active} onPick={pick} />
+          <BodyMapPreview holders={holders} customs={customs} active={active} onPick={pick} />
           <p className="mt-2 text-center text-xs text-slate-500">
             {holders.size} of {BODY_MAP_SPOTS.length} spots linked
+            {customs.length > 0 ? `, plus ${customs.length} you placed` : ''}
           </p>
         </div>
 
@@ -234,20 +303,52 @@ export function BodyMapSection() {
         </div>
       </div>
 
+      {customs.length > 0 ? (
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Placed by you ({customs.length})
+          </h3>
+          <ul className="mt-1 grid gap-x-6 sm:grid-cols-2">
+            {customs.map((ct) => (
+              <CustomSpotRow key={ct.id} caseType={ct} onMove={() => setPlacing(ct.id)} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {offMap.length > 0 ? (
         <div className="mt-5 border-t border-slate-100 pt-4">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Not on the body map ({offMap.length})
           </h3>
-          <p className="mt-1 text-xs text-slate-500">Shown in the widget as buttons under the figure.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Shown in the widget as buttons under the figure. Place one on the figure to make it tappable there.
+          </p>
           <ul className="mt-2 flex flex-wrap gap-2">
             {offMap.map((ct) => (
-              <li key={ct.id} className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-700">
+              <li key={ct.id} className="flex items-center gap-1 rounded-full bg-slate-100 py-0.5 pl-2.5 pr-1 text-xs text-slate-700">
                 {ct.name}
+                <button
+                  type="button"
+                  onClick={() => setPlacing(ct.id)}
+                  aria-label={`Place ${ct.name} on the body map`}
+                  className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50"
+                >
+                  Place on map
+                </button>
               </li>
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {placingCaseType ? (
+        <PlaceOnMapDialog
+          key={placingCaseType.id}
+          caseType={placingCaseType}
+          all={caseTypes}
+          onClose={() => setPlacing(null)}
+        />
       ) : null}
     </section>
   )

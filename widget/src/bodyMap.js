@@ -1,9 +1,14 @@
-import { BODY_MAP_SPOTS } from '../../src/shared/bodyMap'
-import { OUTLINE_PATH, OUTLINE_SIZE, VIEW_FRAMES } from '../../src/shared/bodyOutline'
+import { framePoint, resolveSpot } from '../../src/shared/bodyMap'
+import { BODY_MAP_LABELS, LABEL_SIZE, labelLayout } from '../../src/shared/bodyMapLabels'
+import { MAP_VIEWBOX, OUTLINE_PATH } from '../../src/shared/bodyOutline'
+
+/** Where each built-in spot's label sits (src/shared/bodyMapLabels.ts); exported for the tests. */
+export var LABELS = BODY_MAP_LABELS
 
 /**
  * The clickable body map shown in place of the case type list when the org has
- * linked case types to spots (case_types.map_tag).
+ * linked case types to spots: a built-in spot (case_types.map_tag) or one the
+ * admin placed themselves (case_types.map_view / map_x / map_y).
  *
  * Tapping a spot zooms in on it and asks to confirm; Continue hands the case
  * type to `onSelect`, which is the same path a list button takes, so matching
@@ -19,42 +24,7 @@ var SVG_NS = 'http://www.w3.org/2000/svg'
 var ZOOM = 2.6
 
 /** The drawing area: the outline plus a margin on each side for labels. */
-var VIEWBOX = { x: -40, y: 0, width: 1334, height: OUTLINE_SIZE }
-
-/** Label text size, in outline units (about 12-13px at the widget's width). */
-var LABEL_SIZE = 46
-
-/**
- * Where each label sits, in outline coordinates, placed by hand in the white
- * space around the figures -- beside the head, between the arms, beside and
- * below the legs -- so the text can be large without covering the body or
- * another label. A leader line joins each label to its dot. `lines` splits a
- * label that is too wide for its gap.
- *
- * The text shown is the spot's label, not the case type's name, because these
- * slots are sized for it; the case type's name is what the zoomed view and
- * screen readers announce.
- */
-export var LABELS = {
-  shoulder: { x: 205, y: 190, anchor: 'end' },
-  clavicle: { x: 470, y: 190, anchor: 'start' },
-  bicep: { x: 565, y: 365, anchor: 'start' },
-  elbow: { x: 140, y: 440, anchor: 'end' },
-  pelvis: { x: 140, y: 575, anchor: 'end' },
-  hand: { x: 120, y: 810, anchor: 'middle' },
-  wrist: { x: 610, y: 615, anchor: 'start' },
-  hip: { x: 560, y: 480, anchor: 'start' },
-  groin: { x: 385, y: 748, anchor: 'start' },
-  knee: { x: 450, y: 866, anchor: 'start' },
-  'shin-splints': { x: 235, y: 975, anchor: 'end', lines: ['Shin', 'Splints'] },
-  ankle: { x: 490, y: 1090, anchor: 'start' },
-  foot: { x: 235, y: 1160, anchor: 'end' },
-  toes: { x: 490, y: 1190, anchor: 'start' },
-  neck: { x: 990, y: 170, anchor: 'start' },
-  'low-back': { x: 1110, y: 470, anchor: 'start', lines: ['Low', 'Back'] },
-  achilles: { x: 1000, y: 1080, anchor: 'start' },
-  heel: { x: 760, y: 1190, anchor: 'end' },
-}
+var VIEWBOX = MAP_VIEWBOX
 
 /**
  * The label's approximate box. Text is not measured (the map is built before
@@ -101,27 +71,22 @@ function svgEl(doc, name, attrs) {
 
 /** A spot's centre in outline coordinates. */
 function spotPoint(spot) {
-  var frame = VIEW_FRAMES[spot.view]
-  return {
-    x: frame.x + (spot.x / 100) * frame.width,
-    y: frame.y + (spot.y / 100) * frame.height,
-  }
+  return framePoint(spot.view, spot.x, spot.y)
 }
 
 /**
  * The case types that have a spot, paired with it, and the ones that do not.
  * A tag the widget does not know (a spot added to the database before this
  * widget build) is treated as no spot rather than dropped.
+ *
+ * A spot the admin placed carries its own position, so it needs no widget
+ * update: the case type's name is its label.
  */
 export function partitionCaseTypes(caseTypes) {
   var placed = []
   var unplaced = []
   ;(caseTypes || []).forEach(function (ct) {
-    var spot = ct.map_tag
-      ? BODY_MAP_SPOTS.find(function (s) {
-          return s.tag === ct.map_tag
-        })
-      : null
+    var spot = resolveSpot(ct)
     if (spot) placed.push({ caseType: ct, spot: spot })
     else unplaced.push(ct)
   })
@@ -130,7 +95,7 @@ export function partitionCaseTypes(caseTypes) {
 
 /** A spot's label and the leader line from it to the dot. */
 function buildCallout(doc, spot, p) {
-  var layout = LABELS[spot.tag] || { x: p.x + 40, y: p.y + 14, anchor: 'start' }
+  var layout = labelLayout(spot)
   var lines = layout.lines || [spot.label]
   var box = labelBox(layout, lines)
   var from = leaderStart(box, p)

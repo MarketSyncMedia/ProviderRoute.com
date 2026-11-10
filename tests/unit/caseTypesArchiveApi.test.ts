@@ -32,7 +32,12 @@ vi.mock('../../src/lib/supabase', () => ({
   },
 }))
 
-import { getCaseTypeProviders, restoreCaseType } from '../../src/lib/api/caseTypes'
+import {
+  getCaseTypeProviders,
+  restoreCaseType,
+  updateCaseTypeMapPosition,
+  updateCaseTypeMapTag,
+} from '../../src/lib/api/caseTypes'
 
 function updateOf(call: Call) {
   return call.ops.find(([op]) => op === 'update')?.[1]
@@ -118,5 +123,59 @@ describe('getCaseTypeProviders', () => {
     fake.queue.push({ data: null, error: { message: 'boom' } })
 
     await expect(getCaseTypeProviders('ct1')).rejects.toThrow(/could not load/i)
+  })
+})
+
+describe('body map placement', () => {
+  const none = { map_view: null, map_x: null, map_y: null, map_label_x: null, map_label_y: null }
+
+  it('linking a built-in spot drops any position the admin placed', async () => {
+    fake.queue.push({ data: null, error: null })
+
+    const result = await updateCaseTypeMapTag('ct1', 'knee')
+
+    expect(result).toEqual({ error: null })
+    expect(updateOf(fake.calls[0])).toEqual({ map_tag: 'knee', ...none })
+    expect(fake.calls[0].ops).toContainEqual(['eq', 'id', 'ct1'])
+  })
+
+  it('placing a case type drops its built-in spot', async () => {
+    fake.queue.push({ data: null, error: null })
+
+    const result = await updateCaseTypeMapPosition('ct1', { view: 'front', x: 45, y: 27, labelX: 5, labelY: 25 })
+
+    expect(result).toEqual({ error: null })
+    expect(updateOf(fake.calls[0])).toEqual({
+      map_tag: null,
+      map_view: 'front',
+      map_x: 45,
+      map_y: 27,
+      map_label_x: 5,
+      map_label_y: 25,
+    })
+  })
+
+  it('stores no label when none was placed', async () => {
+    fake.queue.push({ data: null, error: null })
+
+    await updateCaseTypeMapPosition('ct1', { view: 'back', x: 10, y: 20, labelX: null, labelY: null })
+
+    expect(updateOf(fake.calls[0])).toMatchObject({ map_view: 'back', map_label_x: null, map_label_y: null })
+  })
+
+  it('takes a case type off the map with null', async () => {
+    fake.queue.push({ data: null, error: null })
+
+    await updateCaseTypeMapPosition('ct1', null)
+
+    expect(updateOf(fake.calls[0])).toEqual({ map_tag: null, ...none })
+  })
+
+  it('reports a failed save', async () => {
+    fake.queue.push({ data: null, error: { message: 'violates check constraint' } })
+
+    expect(await updateCaseTypeMapPosition('ct1', { view: 'front', x: 1, y: 2, labelX: null, labelY: null })).toEqual({
+      error: 'violates check constraint',
+    })
   })
 })
