@@ -115,7 +115,9 @@ describe('scale', () => {
     expect(screen.getAllByRole('button', { name: /edit category/i })).toHaveLength(500)
     // Guard against a regression that makes this pathological rather than slow.
     expect(ms).toBeLessThan(15_000)
-  })
+    // Its own timeout must outlast that guard: vitest's default 5s ended the test
+    // first on a busy machine, which made the 15s guard unreachable.
+  }, 30_000)
 
   it('fetches offering counts for the whole list in one call, not one per row', async () => {
     const many = Array.from({ length: 120 }, (_, i) =>

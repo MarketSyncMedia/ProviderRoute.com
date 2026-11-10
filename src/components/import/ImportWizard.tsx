@@ -10,6 +10,7 @@ import { supabase } from '../../lib/supabase'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import { useToast } from '../ui/toastStore'
 import { parseFile, type ParseResult } from '../../lib/parsers/fileParser'
+import { normalizeName } from '../../lib/parsers/nameNormalizer'
 import { applyNameFixes, nameFixKey, suggestNameFixes, suggestProviderNameFixes } from '../../lib/similarNames'
 import type { CaseType, Category, Constraint, Location, Provider } from '../../types/database'
 
@@ -426,6 +427,10 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     let newProviders = 0
     let updatedProviders = 0
     let skippedRows = 0
+    // The import creates or updates a provider once, on the first row that names
+    // them, and later rows (their other case types) reuse that provider. Counting
+    // every row made a provider with three case types read as three providers.
+    const seenProviders = new Set<string>()
     const newCtSet = new Set<string>()
     const newCatSet = new Set<string>()
     let totalOfferings = 0
@@ -446,16 +451,18 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         continue
       }
 
+      const firstRowForProvider = !seenProviders.has(normalizeName(prov))
       if (c && res === 'merge') {
-        updatedProviders += 1
+        if (firstRowForProvider) updatedProviders += 1
       } else if (c && res === 'separate') {
-        newProviders += 1
+        if (firstRowForProvider) newProviders += 1
       } else if (!c) {
-        newProviders += 1
+        if (firstRowForProvider) newProviders += 1
       } else {
         skippedRows += 1
         continue
       }
+      seenProviders.add(normalizeName(prov))
 
       const caseVal = caseTypeHeader ? (row[caseTypeHeader] ?? '').trim() : ''
       if (!caseVal) {

@@ -314,3 +314,81 @@ describe('ImportWizard the same person twice in one file', () => {
     expect(passed.rows[2].provider).toBe('Brodie, Jeffery T.')
   })
 })
+
+describe('ImportWizard preview counts', () => {
+  /** The number shown under a preview tile's label. */
+  const tile = (label: string) => screen.getByText(label).parentElement?.querySelector('p:last-child')?.textContent
+
+  async function toPreview(user: ReturnType<typeof userEvent.setup>, { resolveMerge = false } = {}) {
+    renderWizard()
+    await waitFor(() => expect(orgApi.getProviders).toHaveBeenCalled())
+    await uploadFile(user)
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await mapColumn(user, 'provider', 'Provider Name')
+    await mapColumn(user, 'Case type', 'Case Type')
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    if (resolveMerge) {
+      for (const radio of await screen.findAllByRole('radio', { name: /^Merge/i })) await user.click(radio)
+    } else {
+      await screen.findByText(/no duplicates detected/i)
+    }
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await screen.findByText('Preview import')
+  }
+
+  it('counts each new provider once, however many case types they are listed under', async () => {
+    const rows = [
+      { provider: 'Dr. Amy Adams', 'Case type': 'Knee' },
+      { provider: 'Dr. Amy Adams', 'Case type': 'Hip' },
+      { provider: 'dr amy adams', 'Case type': 'Shoulder' },
+      { provider: 'Bob Brown', 'Case type': 'Knee' },
+    ]
+    parse.parseFile.mockResolvedValue({ headers: HEADERS, rows, errors: [], rowCount: rows.length })
+    orgApi.getProviders.mockResolvedValue([])
+    const user = userEvent.setup()
+    await toPreview(user)
+
+    expect(tile('New providers')).toBe('2')
+    expect(tile('Updated providers')).toBe('0')
+    // Every row still becomes an offering.
+    expect(tile('Total offerings')).toBe('4')
+  })
+
+  it('counts an existing provider once when several rows merge into them', async () => {
+    const rows = [
+      { provider: 'Dr. Jane Smith', 'Case type': 'Knee' },
+      { provider: 'Dr. Jane Smith', 'Case type': 'Hip' },
+    ]
+    parse.parseFile.mockResolvedValue({ headers: HEADERS, rows, errors: [], rowCount: rows.length })
+    const user = userEvent.setup()
+    await toPreview(user, { resolveMerge: true })
+
+    expect(tile('Updated providers')).toBe('1')
+    expect(tile('New providers')).toBe('0')
+    expect(tile('Total offerings')).toBe('2')
+  })
+
+  it('does not count skipped rows as providers', async () => {
+    const rows = [
+      { provider: 'Dr. Jane Smith', 'Case type': 'Knee' },
+      { provider: 'Bob Brown', 'Case type': 'Hip' },
+      { provider: 'Bob Brown', 'Case type': 'Knee' },
+    ]
+    parse.parseFile.mockResolvedValue({ headers: HEADERS, rows, errors: [], rowCount: rows.length })
+    const user = userEvent.setup()
+    renderWizard()
+    await waitFor(() => expect(orgApi.getProviders).toHaveBeenCalled())
+    await uploadFile(user)
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await mapColumn(user, 'provider', 'Provider Name')
+    await mapColumn(user, 'Case type', 'Case Type')
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await user.click(await screen.findByRole('radio', { name: /^Skip row/i }))
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await screen.findByText('Preview import')
+
+    expect(tile('New providers')).toBe('1')
+    expect(tile('Skipped')).toBe('1')
+    expect(tile('Total offerings')).toBe('2')
+  })
+})
