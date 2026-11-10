@@ -7,6 +7,9 @@
 -- back), where on it, and optionally where its name is written. Positions are
 -- percentages of the figure, like the built-in spots, so they hold at any size.
 --
+-- (Every column is tested IS NOT NULL as well as for range: a CHECK passes when it
+-- evaluates to NULL, so a missing value would otherwise slip through.)
+--
 -- Purely additive: every existing row has all of these null and behaves as
 -- before. A case type uses a built-in spot or its own position, never both.
 -- The widget-data edge function must be redeployed to publish the new columns;
@@ -27,7 +30,7 @@ ALTER TABLE public.case_types ADD CONSTRAINT case_types_map_position_check CHECK
   )
   OR (
     map_tag IS NULL
-    AND map_view IN ('front', 'back')
+    AND map_view IS NOT NULL AND map_view IN ('front', 'back')
     AND map_x IS NOT NULL AND map_x BETWEEN 0 AND 100
     AND map_y IS NOT NULL AND map_y BETWEEN 0 AND 100
     AND (
