@@ -140,7 +140,7 @@ serve(async (req) => {
       selectAllRows((from, to) =>
         supabase
           .from('case_types')
-          .select('id,name,sort_order,map_tag')
+          .select('id,name,sort_order,map_tag,map_view,map_x,map_y,map_label_x,map_label_y')
           .eq('org_id', orgId)
           .eq('is_archived', false)
           .order('name')

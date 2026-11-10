@@ -10,6 +10,9 @@
 
 export const OUTLINE_SIZE = 1254
 
+/** What the widget and the case types page draw: the outline plus a margin each side for labels. */
+export const MAP_VIEWBOX = { x: -40, y: 0, width: 1334, height: OUTLINE_SIZE }
+
 export const VIEW_FRAMES = {
   front: { x: 99.1, y: 19.4, width: 518.7, height: 1184.2 },
   back: { x: 635.1, y: 17.0, width: 518.4, height: 1183.6 },

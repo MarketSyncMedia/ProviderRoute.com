@@ -89,6 +89,11 @@ export type Database = {
           id: string
           is_archived: boolean | null
           map_tag: string | null
+          map_view: string | null
+          map_x: number | null
+          map_y: number | null
+          map_label_x: number | null
+          map_label_y: number | null
           name: string
           org_id: string
           sort_order: number
@@ -99,6 +104,11 @@ export type Database = {
           id?: string
           is_archived?: boolean | null
           map_tag?: string | null
+          map_view?: string | null
+          map_x?: number | null
+          map_y?: number | null
+          map_label_x?: number | null
+          map_label_y?: number | null
           name: string
           org_id: string
           sort_order?: number
@@ -109,6 +119,11 @@ export type Database = {
           id?: string
           is_archived?: boolean | null
           map_tag?: string | null
+          map_view?: string | null
+          map_x?: number | null
+          map_y?: number | null
+          map_label_x?: number | null
+          map_label_y?: number | null
           name?: string
           org_id?: string
           sort_order?: number

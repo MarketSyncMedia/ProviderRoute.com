@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CaseType } from '../../src/types/database'
@@ -38,6 +38,7 @@ const api = vi.hoisted(() => ({
   updateCaseTypeOrders: vi.fn(),
   archiveCaseType: vi.fn(),
   updateCaseTypeMapTag: vi.fn(),
+  updateCaseTypeMapPosition: vi.fn(),
   getArchivedCaseTypes: vi.fn(),
   restoreCaseType: vi.fn(),
   getCaseTypeProviders: vi.fn(),
@@ -329,6 +330,140 @@ describe('CaseTypesPage body map section', () => {
 
     expect(screen.queryByRole('dialog', { name: /suggested body map matches/i })).not.toBeInTheDocument()
     expect(api.updateCaseTypeMapTag).not.toHaveBeenCalled()
+  })
+})
+
+describe('CaseTypesPage placing case types on the body map', () => {
+  beforeEach(() => {
+    api.updateCaseTypeMapPosition.mockResolvedValue({ error: null })
+  })
+
+  /** jsdom has no layout, so give the dialog's map a size to click inside. */
+  function sizeMap(dialog: HTMLElement) {
+    const svg = dialog.querySelector('svg[role="img"]') as SVGSVGElement
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 1334, height: 1254, right: 1334, bottom: 1254, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    return svg
+  }
+
+  async function openPlace(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole('button', { name: 'Place Knee Pain on the body map' }))
+    return screen.getByRole('dialog', { name: 'Place Knee Pain on the body map' })
+  }
+
+  it('offers to place a case type that has no spot', async () => {
+    renderPage()
+    expect(await screen.findByRole('button', { name: 'Place Knee Pain on the body map' })).toBeInTheDocument()
+  })
+
+  it('saves the dot where the admin clicked, then the label', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const dialog = await openPlace(user)
+    const svg = sizeMap(dialog)
+    expect(within(dialog).getByRole('button', { name: 'Save placement' })).toBeDisabled()
+
+    // The drawing starts at x = -40, so clientX 400 is outline x 360 (inside the front figure).
+    fireEvent.click(svg, { clientX: 400, clientY: 300 })
+    expect(within(dialog).getByRole('button', { name: 'Place the label' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(svg, { clientX: 100, clientY: 280 })
+    await user.click(within(dialog).getByRole('button', { name: 'Save placement' }))
+
+    await waitFor(() => expect(api.updateCaseTypeMapPosition).toHaveBeenCalledTimes(1))
+    const [id, position] = api.updateCaseTypeMapPosition.mock.calls[0]
+    expect(id).toBe('ct1')
+    expect(position.view).toBe('front')
+    expect(position.x).toBeCloseTo(((360 - 99.1) / 518.7) * 100, 1)
+    expect(position.y).toBeCloseTo(((300 - 19.4) / 1184.2) * 100, 1)
+    expect(position.labelX).toBeLessThan(position.x)
+    expect(api.updateCaseTypeMapTag).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith('Knee Pain placed on the body map')
+    expect(screen.queryByRole('dialog', { name: /place knee pain/i })).not.toBeInTheDocument()
+  })
+
+  it('saves the dot alone when the label is left to the default', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const dialog = await openPlace(user)
+    fireEvent.click(sizeMap(dialog), { clientX: 800, clientY: 500 })
+    await user.click(within(dialog).getByRole('button', { name: 'Save placement' }))
+
+    await waitFor(() => expect(api.updateCaseTypeMapPosition).toHaveBeenCalled())
+    expect(api.updateCaseTypeMapPosition.mock.calls[0][1]).toMatchObject({ view: 'back', labelX: null, labelY: null })
+  })
+
+  it('nudges the dot a percent at a time, for precision and for the keyboard', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const dialog = await openPlace(user)
+    fireEvent.click(sizeMap(dialog), { clientX: 400, clientY: 300 })
+    await user.click(within(dialog).getByRole('button', { name: 'Place the dot' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Nudge right' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Nudge down' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Save placement' }))
+
+    await waitFor(() => expect(api.updateCaseTypeMapPosition).toHaveBeenCalled())
+    const position = api.updateCaseTypeMapPosition.mock.calls[0][1]
+    expect(position.x).toBeCloseTo(((360 - 99.1) / 518.7) * 100 + 1, 1)
+    expect(position.y).toBeCloseTo(((300 - 19.4) / 1184.2) * 100 + 1, 1)
+  })
+
+  it('writes nothing when cancelled', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const dialog = await openPlace(user)
+    fireEvent.click(sizeMap(dialog), { clientX: 400, clientY: 300 })
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    expect(api.updateCaseTypeMapPosition).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('keeps the dialog open and says so when the save fails', async () => {
+    api.updateCaseTypeMapPosition.mockResolvedValue({ error: 'nope' })
+    const user = userEvent.setup()
+    renderPage()
+    const dialog = await openPlace(user)
+    fireEvent.click(sizeMap(dialog), { clientX: 400, clientY: 300 })
+    await user.click(within(dialog).getByRole('button', { name: 'Save placement' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('nope'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  describe('a case type already placed', () => {
+    const placed = () =>
+      caseType({ id: 'pec', name: 'Pectoral', map_view: 'front', map_x: 45, map_y: 27 } as Partial<CaseType>)
+
+    beforeEach(() => {
+      api.getCaseTypes.mockResolvedValue([caseType(), placed()])
+    })
+
+    it('is listed as placed by the admin, not as off the map', async () => {
+      renderPage()
+      const section = (await screen.findByRole('heading', { name: /placed by you \(1\)/i })).parentElement!
+      expect(within(section).getByText('Pectoral')).toBeInTheDocument()
+      const offMap = (await screen.findByRole('heading', { name: /not on the body map \(1\)/i })).parentElement!
+      expect(within(offMap).queryByText('Pectoral')).not.toBeInTheDocument()
+      expect(screen.getByText(/0 of 18 spots linked, plus 1 you placed/)).toBeInTheDocument()
+    })
+
+    it('opens with its spot when moved', async () => {
+      const user = userEvent.setup()
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: 'Move Pectoral on the body map' }))
+      const dialog = screen.getByRole('dialog', { name: 'Place Pectoral on the body map' })
+      expect(within(dialog).getByRole('button', { name: 'Save placement' })).toBeEnabled()
+    })
+
+    it('is taken off the map with null, leaving the case type itself alone', async () => {
+      const user = userEvent.setup()
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: 'Remove Pectoral from the body map' }))
+
+      expect(api.updateCaseTypeMapPosition).toHaveBeenCalledWith('pec', null)
+      expect(api.archiveCaseType).not.toHaveBeenCalled()
+    })
   })
 })
 
