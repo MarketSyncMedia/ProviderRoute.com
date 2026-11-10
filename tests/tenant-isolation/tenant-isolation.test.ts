@@ -637,6 +637,82 @@ describe('tenant isolation (staging Supabase RLS)', () => {
     })
   })
 
+  describe('10c. imports and archived providers', () => {
+    it('merges into an archived provider and brings them back', async () => {
+      const { tenantA, runId } = harness
+      const name = `Restore Import Provider ${runId}`
+      const caseName = `Restore Import Case ${runId}`
+      const key = name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+
+      const { data: provider, error: providerError } = await tenantA.client
+        .from('providers')
+        .insert({ org_id: tenantA.orgId, name, normalized_name: key, category_ids: [], is_archived: true })
+        .select('id')
+        .single()
+      expect(providerError).toBeNull()
+
+      const { data, error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(name, caseName, {
+          conflicts: [{ rowIndex: 0, existingProviderId: provider!.id }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect(data).toMatchObject({ providersCreated: 0, providersUpdated: 1, offeringsUpserted: 1 })
+
+      const { data: restored } = await tenantA.client
+        .from('providers')
+        .select('is_archived')
+        .eq('id', provider!.id)
+        .single()
+      expect(restored?.is_archived).toBe(false)
+      const { count } = await tenantA.client
+        .from('providers')
+        .select('id', { count: 'exact', head: true })
+        .eq('normalized_name', key)
+      expect(count).toBe(1)
+    })
+
+    it('leaves an archived provider archived when the row is kept separate', async () => {
+      const { tenantA, runId } = harness
+      const name = `Separate Import Provider ${runId}`
+      const key = name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+      const { data: provider } = await tenantA.client
+        .from('providers')
+        .insert({ org_id: tenantA.orgId, name, normalized_name: key, category_ids: [], is_archived: true })
+        .select('id')
+        .single()
+
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(name, `Separate Import Case ${runId}`, {
+          conflicts: [{ rowIndex: 0, existingProviderId: provider!.id }],
+          resolvedConflicts: { 0: 'separate' },
+        }),
+      })
+      expect(error).toBeNull()
+
+      const { data: original } = await tenantA.client.from('providers').select('is_archived').eq('id', provider!.id).single()
+      expect(original?.is_archived).toBe(true)
+    })
+
+    it('still rejects a conflict provider from another tenant, archived or not', async () => {
+      const { tenantA, tenantB, runId } = harness
+      const { data: foreign } = await harness.service
+        .from('providers')
+        .insert({ org_id: tenantB.orgId, name: `Foreign Archived ${runId}`, normalized_name: `foreign archived ${runId}`, category_ids: [], is_archived: true })
+        .select('id')
+        .single()
+
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(`Foreign Archived ${runId}`, `Foreign Case ${runId}`, {
+          conflicts: [{ rowIndex: 0, existingProviderId: foreign!.id }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).not.toBeNull()
+    })
+  })
+
   describe('11. live widget publication requirements', () => {
     const PRIVACY_URL = 'https://example.invalid/privacy'
     const DISCLAIMER = 'Informational only, not medical advice.'

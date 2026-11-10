@@ -1,4 +1,5 @@
 import { fuzzyMatch, normalizeName } from './parsers/nameNormalizer'
+import { compareProviderNames, parseProviderName, type ProviderNameParts } from './parsers/providerName'
 
 /**
  * How alike two names must be (1 is identical) for one to be treated as a
@@ -34,9 +35,12 @@ export function findSimilarName(name: string, existing: readonly string[]): Simi
   return best
 }
 
-export type NameKind = 'caseType' | 'category'
+export type NameKind = 'caseType' | 'category' | 'provider'
 
-/** A name in an import file that is probably a misspelling of one that exists. */
+/**
+ * A name in an import file that is probably another spelling of one that exists
+ * (a case type or category) or of an earlier row in the file (a provider).
+ */
 export interface NameFix {
   kind: NameKind
   incoming: string
@@ -96,21 +100,58 @@ export function suggestNameFixes({
 }
 
 /**
+ * Provider names in the file that look like another spelling of an earlier row's
+ * provider: "Brodie, Jeffery T." after "Dr. Jeffery T. Brodie". The import only
+ * treats names as one person when they match once case and punctuation are
+ * ignored, so left alone these become two providers. Each is paired with the
+ * spelling that came first.
+ */
+export function suggestProviderNameFixes(rows: Record<string, string>[], providerHeader: string): NameFix[] {
+  const seen: { name: string; parts: ProviderNameParts }[] = []
+  const fixes = new Map<string, NameFix>()
+
+  for (const row of rows) {
+    const raw = (row[providerHeader] ?? '').trim()
+    if (!raw) continue
+    const key = nameFixKey({ kind: 'provider', incoming: raw })
+    if (fixes.has(key)) continue
+    // Already the same name to the import, so nothing to suggest.
+    if (seen.some((earlier) => normalizeName(earlier.name) === normalizeName(raw))) continue
+
+    const parts = parseProviderName(raw)
+    let best: { name: string; score: number } | null = null
+    for (const earlier of seen) {
+      const match = compareProviderNames(parts, earlier.parts)
+      if (match && (!best || match.score > best.score)) best = { name: earlier.name, score: match.score }
+    }
+    if (best) fixes.set(key, { kind: 'provider', incoming: raw, suggested: best.name, score: best.score })
+    else seen.push({ name: raw, parts })
+  }
+  return [...fixes.values()]
+}
+
+/**
  * The rows with each fix applied: a case type cell naming `incoming` reads
- * `suggested` instead, and so does each matching entry in a category cell. The
- * same rows come back when there is nothing to apply.
+ * `suggested` instead, and so does each matching entry in a category cell, and
+ * a provider cell. The same rows come back when there is nothing to apply.
  */
 export function applyNameFixes(
   rows: Record<string, string>[],
   caseTypeHeader: string | undefined,
   categoryHeader: string | undefined,
   fixes: readonly NameFix[],
+  providerHeader?: string,
 ): Record<string, string>[] {
   if (fixes.length === 0) return rows
   const suggestedBy = new Map(fixes.map((fix) => [nameFixKey(fix), fix.suggested]))
 
   return rows.map((row) => {
     let next = row
+    if (providerHeader) {
+      const incoming = (row[providerHeader] ?? '').trim()
+      const suggested = suggestedBy.get(nameFixKey({ kind: 'provider', incoming }))
+      if (suggested) next = { ...next, [providerHeader]: suggested }
+    }
     if (caseTypeHeader) {
       const incoming = (row[caseTypeHeader] ?? '').trim()
       const suggested = suggestedBy.get(nameFixKey({ kind: 'caseType', incoming }))

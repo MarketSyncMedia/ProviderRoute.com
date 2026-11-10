@@ -4,13 +4,14 @@ import { getCaseTypes } from '../../lib/api/caseTypes'
 import { getCategories } from '../../lib/api/categories'
 import { createConstraint, getConstraints } from '../../lib/api/constraints'
 import { createLocation, getLocations } from '../../lib/api/locations'
-import { getProviders } from '../../lib/api/providers'
+import { getArchivedProviders, getProviders } from '../../lib/api/providers'
 import { detectConflicts, executeImportRun, type ConflictItem } from '../../lib/import/importExecution'
 import { supabase } from '../../lib/supabase'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import { useToast } from '../ui/toastStore'
 import { parseFile, type ParseResult } from '../../lib/parsers/fileParser'
-import { applyNameFixes, nameFixKey, suggestNameFixes } from '../../lib/similarNames'
+import { normalizeName } from '../../lib/parsers/nameNormalizer'
+import { applyNameFixes, nameFixKey, suggestNameFixes, suggestProviderNameFixes } from '../../lib/similarNames'
 import type { CaseType, Category, Constraint, Location, Provider } from '../../types/database'
 
 export type ColumnRole =
@@ -184,17 +185,20 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
 
     let cancelled = false
     void (async () => {
-      const [locs, cons, provs, cts, cats] = await Promise.all([
+      const [locs, cons, provs, archivedProvs, cts, cats] = await Promise.all([
         getLocations(orgId),
         getConstraints(orgId),
         getProviders(orgId),
+        getArchivedProviders(orgId),
         getCaseTypes(orgId),
         getCategories(orgId),
       ])
       if (!cancelled) {
         setOrgLocations(locs)
         setOrgConstraints(cons)
-        setExistingProviders(provs)
+        // Archived providers are matched too, after live ones so a live match wins a tie:
+        // an import row naming one would otherwise create a second provider for them.
+        setExistingProviders([...provs, ...archivedProvs])
         setOrgCaseTypes(cts)
         setOrgCategories(cats)
       }
@@ -357,13 +361,17 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
   // one keeps the file's spelling.
   const nameFixes = useMemo(() => {
     if (!parseResult?.rows.length) return []
-    return suggestNameFixes({
-      rows: parseResult.rows,
-      caseTypeHeader: mappings.find((m) => m.role === 'case_type')?.excelHeader,
-      categoryHeader: mappings.find((m) => m.role === 'category')?.excelHeader,
-      existingCaseTypes: orgCaseTypes.map((c) => c.name),
-      existingCategories: orgCategories.map((c) => c.name),
-    })
+    const providerHeader = mappings.find((m) => m.role === 'provider_name')?.excelHeader
+    return [
+      ...(providerHeader ? suggestProviderNameFixes(parseResult.rows, providerHeader) : []),
+      ...suggestNameFixes({
+        rows: parseResult.rows,
+        caseTypeHeader: mappings.find((m) => m.role === 'case_type')?.excelHeader,
+        categoryHeader: mappings.find((m) => m.role === 'category')?.excelHeader,
+        existingCaseTypes: orgCaseTypes.map((c) => c.name),
+        existingCategories: orgCategories.map((c) => c.name),
+      }),
+    ]
   }, [parseResult, mappings, orgCaseTypes, orgCategories])
   const [skippedNameFixes, setSkippedNameFixes] = useState<Set<string>>(() => new Set())
   // What is previewed and imported: the file's rows with the matched names
@@ -375,6 +383,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         mappings.find((m) => m.role === 'case_type')?.excelHeader,
         mappings.find((m) => m.role === 'category')?.excelHeader,
         nameFixes.filter((fix) => !skippedNameFixes.has(nameFixKey(fix))),
+        mappings.find((m) => m.role === 'provider_name')?.excelHeader,
       ),
     [parseResult, mappings, nameFixes, skippedNameFixes],
   )
@@ -418,6 +427,10 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     let newProviders = 0
     let updatedProviders = 0
     let skippedRows = 0
+    // The import creates or updates a provider once, on the first row that names
+    // them, and later rows (their other case types) reuse that provider. Counting
+    // every row made a provider with three case types read as three providers.
+    const seenProviders = new Set<string>()
     const newCtSet = new Set<string>()
     const newCatSet = new Set<string>()
     let totalOfferings = 0
@@ -438,16 +451,18 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         continue
       }
 
+      const firstRowForProvider = !seenProviders.has(normalizeName(prov))
       if (c && res === 'merge') {
-        updatedProviders += 1
+        if (firstRowForProvider) updatedProviders += 1
       } else if (c && res === 'separate') {
-        newProviders += 1
+        if (firstRowForProvider) newProviders += 1
       } else if (!c) {
-        newProviders += 1
+        if (firstRowForProvider) newProviders += 1
       } else {
         skippedRows += 1
         continue
       }
+      seenProviders.add(normalizeName(prov))
 
       const caseVal = caseTypeHeader ? (row[caseTypeHeader] ?? '').trim() : ''
       if (!caseVal) {
@@ -1309,7 +1324,14 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                         {conflicts.map((c) => (
                           <tr key={`${c.rowIndex}-${c.existingProvider.id}`} className="border-b border-slate-100 last:border-0">
                             <td className="px-3 py-2 font-medium text-slate-800">{c.incomingName}</td>
-                            <td className="px-3 py-2 text-slate-700">{c.existingProvider.name}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {c.existingProvider.name}
+                              {c.existingProvider.is_archived ? (
+                                <span className="ml-2 inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </td>
                             <td className="px-3 py-2">
                               {c.matchType === 'exact' ? (
                                 <span className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
@@ -1339,7 +1361,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                                     }
                                     className="text-indigo-600"
                                   />
-                                  Merge (update existing)
+                                  {c.existingProvider.is_archived ? 'Merge (restore and update)' : 'Merge (update existing)'}
                                 </label>
                                 <label className="flex cursor-pointer items-center gap-1.5 text-xs">
                                   <input
@@ -1384,8 +1406,9 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                 <div className={conflicts.length > 0 ? 'mt-6' : ''}>
                   <h3 className="mb-1 text-lg font-semibold text-slate-900">These names look misspelled</h3>
                   <p className="mb-3 text-sm text-slate-600">
-                    Each is almost the same as one you already have. Matching them keeps one clean list instead of
-                    adding a near-duplicate beside the real one.
+                    Each looks like the same thing written two ways: a name you already have, or an earlier row in
+                    this file. Matching them keeps one clean list instead of adding a near-duplicate beside the real
+                    one.
                   </p>
                   <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                     {nameFixes.map((fix) => {
@@ -1409,7 +1432,11 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                               Treat <span className="font-medium text-slate-900">“{fix.incoming}”</span> as{' '}
                               <span className="font-medium text-slate-900">“{fix.suggested}”</span>
                               <span className="ml-2 text-xs text-slate-500">
-                                {fix.kind === 'caseType' ? 'Case type' : 'Category'}
+                                {fix.kind === 'caseType'
+                                  ? 'Case type'
+                                  : fix.kind === 'category'
+                                    ? 'Category'
+                                    : 'Provider, earlier in this file'}
                               </span>
                             </span>
                           </label>
