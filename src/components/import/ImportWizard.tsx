@@ -73,7 +73,7 @@ const MAP_ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: 'category', label: 'Category' },
   { value: 'location', label: 'Location' },
   { value: 'constraint', label: 'Constraint' },
-  { value: 'booking_link', label: 'Booking Link' },
+  { value: 'booking_link', label: 'Appointment Request Link' },
   { value: 'phone', label: 'Phone Number' },
   { value: 'ignore', label: 'Ignore this column' },
 ]

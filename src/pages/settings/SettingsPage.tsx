@@ -14,6 +14,7 @@ type OrgFormValues = {
   allowed_domains_text: string
   default_booking_mode: 'simple' | 'advanced'
   default_phone_mode: 'simple' | 'advanced'
+  default_self_schedule_mode: 'simple' | 'advanced'
 }
 
 export default function SettingsPage() {
@@ -66,6 +67,7 @@ export default function SettingsPage() {
       allowed_domains_text: (org.allowed_domains ?? []).join('\n'),
       default_booking_mode: asOrgMode(org.default_booking_mode),
       default_phone_mode: asOrgMode(org.default_phone_mode),
+      default_self_schedule_mode: asOrgMode(org.default_self_schedule_mode),
     })
   }, [org, reset])
 
@@ -167,6 +169,7 @@ export default function SettingsPage() {
         allowed_domains,
         default_booking_mode: values.default_booking_mode,
         default_phone_mode: values.default_phone_mode,
+        default_self_schedule_mode: values.default_self_schedule_mode,
       })
       .eq('id', org.id)
       .select()
@@ -189,6 +192,7 @@ export default function SettingsPage() {
       allowed_domains_text: (updated.allowed_domains ?? []).join('\n'),
       default_booking_mode: asOrgMode(updated.default_booking_mode),
       default_phone_mode: asOrgMode(updated.default_phone_mode),
+      default_self_schedule_mode: asOrgMode(updated.default_self_schedule_mode),
     })
   })
 
@@ -357,9 +361,19 @@ export default function SettingsPage() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Default Booking Mode</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Default Appointment Request Mode</label>
             <select
               {...register('default_booking_mode')}
+              className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="simple">Simple — Same link for all locations</option>
+              <option value="advanced">Advanced — Different link per location</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Default Self-Scheduling Mode</label>
+            <select
+              {...register('default_self_schedule_mode')}
               className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
             >
               <option value="simple">Simple — Same link for all locations</option>

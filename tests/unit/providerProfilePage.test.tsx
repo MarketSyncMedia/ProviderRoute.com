@@ -324,27 +324,35 @@ describe('ProviderProfilePage archiving the provider', () => {
   })
 })
 
-describe('ProviderProfilePage booking links by mode', () => {
-  const link = (location_id: string, booking_link: string | null, phone: string | null = null) => ({
-    provider_id: 'p1',
-    location_id,
-    booking_link,
-    phone,
-  })
+describe('ProviderProfilePage links by mode', () => {
+  const link = (
+    location_id: string,
+    booking_link: string | null,
+    phone: string | null = null,
+    self_schedule_link: string | null = null,
+  ) => ({ provider_id: 'p1', location_id, booking_link, phone, self_schedule_link })
 
   function setup({
     orgBooking = 'simple',
     orgPhone = 'simple',
+    orgSelf = 'simple',
     provider = {},
     rows = [link('l1', 'https://book.example/one'), link('l2', 'https://book.example/one')],
   }: {
     orgBooking?: string
     orgPhone?: string
+    orgSelf?: string
     provider?: Partial<Provider>
     rows?: ReturnType<typeof link>[]
   } = {}) {
     useAuthStore.setState({
-      org: { id: 'org1', name: 'Test Org', default_booking_mode: orgBooking, default_phone_mode: orgPhone } as never,
+      org: {
+        id: 'org1',
+        name: 'Test Org',
+        default_booking_mode: orgBooking,
+        default_phone_mode: orgPhone,
+        default_self_schedule_mode: orgSelf,
+      } as never,
       user: { id: 'u1', org_id: 'org1', name: 'Tester', email: 't@example.com' } as never,
     })
     providersApi.getProvider.mockResolvedValue(makeProvider(provider))
@@ -357,52 +365,100 @@ describe('ProviderProfilePage booking links by mode', () => {
     ])
   }
 
+  const save = () => userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  /** What was saved at each location: [link, phone, self-scheduling link]. */
+  const savedByLocation = () =>
+    Object.fromEntries(
+      providerLocationsApi.upsertProviderLocation.mock.calls.map((c) => [c[1], [c[2], c[3], c[4]]]),
+    )
+
   beforeEach(() => vi.clearAllMocks())
 
-  it('gives simple mode one booking link and one phone, not a pair per location', async () => {
+  it('gives simple mode one box for each of the three, not a set per location', async () => {
     setup()
     renderPage()
 
-    expect(await screen.findByLabelText('Booking link (all locations)')).toHaveValue('https://book.example/one')
+    expect(await screen.findByLabelText('Appointment request link (all locations)')).toHaveValue('https://book.example/one')
+    expect(screen.getByLabelText('Self-scheduling link (all locations)')).toHaveValue('')
     expect(screen.getByLabelText('Phone (all locations)')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Booking link for Towson')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Appointment request link for Towson')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Self-scheduling link for Towson')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Phone for Rosedale')).not.toBeInTheDocument()
     expect(screen.getByText('Used at Rosedale, Towson.')).toBeInTheDocument()
   })
 
-  it('gives advanced mode a booking link and phone for each location', async () => {
-    setup({ orgBooking: 'advanced', orgPhone: 'advanced' })
+  it('gives advanced mode a box per location for each of the three', async () => {
+    setup({ orgBooking: 'advanced', orgPhone: 'advanced', orgSelf: 'advanced' })
     renderPage()
 
-    expect(await screen.findByLabelText('Booking link for Towson')).toBeInTheDocument()
-    expect(screen.getByLabelText('Booking link for Rosedale')).toBeInTheDocument()
-    expect(screen.getByLabelText('Phone for Towson')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Booking link (all locations)')).not.toBeInTheDocument()
+    for (const location of ['Towson', 'Rosedale']) {
+      expect(await screen.findByLabelText(`Appointment request link for ${location}`)).toBeInTheDocument()
+      expect(screen.getByLabelText(`Self-scheduling link for ${location}`)).toBeInTheDocument()
+      expect(screen.getByLabelText(`Phone for ${location}`)).toBeInTheDocument()
+    }
+    expect(screen.queryByLabelText('Self-scheduling link (all locations)')).not.toBeInTheDocument()
   })
 
   it('follows the provider’s own mode over the account default, one column at a time', async () => {
     setup({ provider: { booking_mode: 'advanced' } })
     renderPage()
 
-    expect(await screen.findByLabelText('Booking link for Towson')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Appointment request link for Towson')).toBeInTheDocument()
+    expect(screen.getByLabelText('Self-scheduling link (all locations)')).toBeInTheDocument()
     expect(screen.getByLabelText('Phone (all locations)')).toBeInTheDocument()
     expect(screen.queryByLabelText('Phone for Towson')).not.toBeInTheDocument()
   })
 
-  it('saves the one link to every location', async () => {
+  it('gives self-scheduling its own mode, separate from the appointment request link', async () => {
+    setup({ orgSelf: 'advanced' })
+    renderPage()
+
+    expect(await screen.findByLabelText('Self-scheduling link for Towson')).toBeInTheDocument()
+    expect(screen.getByLabelText('Appointment request link (all locations)')).toBeInTheDocument()
+  })
+
+  it('saves the one appointment request link to every location', async () => {
     setup()
     renderPage()
-    const field = await screen.findByLabelText('Booking link (all locations)')
+    const field = await screen.findByLabelText('Appointment request link (all locations)')
 
     await userEvent.clear(field)
     await userEvent.type(field, 'https://book.example/new')
-    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await save()
 
     await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
-    expect(providerLocationsApi.upsertProviderLocation.mock.calls).toEqual([
-      ['p1', 'l2', 'https://book.example/new', null],
-      ['p1', 'l1', 'https://book.example/new', null],
-    ])
+    expect(savedByLocation()).toEqual({
+      l1: ['https://book.example/new', null, null],
+      l2: ['https://book.example/new', null, null],
+    })
+  })
+
+  it('saves one self-scheduling link to every location, and nothing when it is left empty', async () => {
+    setup()
+    renderPage()
+    await userEvent.type(await screen.findByLabelText('Self-scheduling link (all locations)'), 'https://cal.example/dr')
+    await save()
+
+    await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
+    expect(savedByLocation()).toEqual({
+      l1: ['https://book.example/one', null, 'https://cal.example/dr'],
+      l2: ['https://book.example/one', null, 'https://cal.example/dr'],
+    })
+  })
+
+  it('clears the self-scheduling link at every location when the box is emptied', async () => {
+    setup({
+      rows: [link('l1', 'https://book.example/one', null, 'https://cal.example/dr'), link('l2', 'https://book.example/one', null, 'https://cal.example/dr')],
+    })
+    renderPage()
+    await userEvent.clear(await screen.findByLabelText('Self-scheduling link (all locations)'))
+    await save()
+
+    await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
+    expect(savedByLocation()).toEqual({
+      l1: ['https://book.example/one', null, null],
+      l2: ['https://book.example/one', null, null],
+    })
   })
 
   it('warns when the locations hold different links, and makes one the link for all on save', async () => {
@@ -411,49 +467,58 @@ describe('ProviderProfilePage booking links by mode', () => {
       rows: [link('l1', 'https://book.example/towson'), link('l2', 'https://book.example/rosedale')],
     })
     renderPage()
-    await screen.findByLabelText('Booking link for Towson')
+    await screen.findByLabelText('Appointment request link for Towson')
     expect(screen.queryByText(/different links/)).not.toBeInTheDocument()
 
-    await userEvent.selectOptions(screen.getAllByDisplayValue('Use org default')[0], 'simple')
+    await userEvent.selectOptions(screen.getByLabelText('Appointment Request Mode'), 'simple')
 
     // The widget uses the first location's link (by id), and so does this field.
-    expect(await screen.findByLabelText('Booking link (all locations)')).toHaveValue('https://book.example/towson')
+    expect(await screen.findByLabelText('Appointment request link (all locations)')).toHaveValue('https://book.example/towson')
     expect(screen.getByText(/different links/)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await save()
 
     await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
-    expect(providerLocationsApi.upsertProviderLocation.mock.calls.map((c) => c[2])).toEqual([
-      'https://book.example/towson',
-      'https://book.example/towson',
-    ])
+    expect(savedByLocation()).toEqual({
+      l1: ['https://book.example/towson', null, null],
+      l2: ['https://book.example/towson', null, null],
+    })
     expect(providersApi.updateProvider).toHaveBeenCalledWith('p1', expect.objectContaining({ booking_mode: 'simple' }))
   })
 
-  it('lets a provider switch mode on its own, without touching anything else', async () => {
-    setup({ orgBooking: 'advanced' })
+  it('lets a provider switch a mode on its own, and saves it', async () => {
+    setup({ orgSelf: 'advanced' })
     renderPage()
-    await screen.findByLabelText('Booking link for Towson')
+    await screen.findByLabelText('Self-scheduling link for Towson')
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
 
-    await userEvent.selectOptions(screen.getAllByDisplayValue('Use org default')[0], 'simple')
+    await userEvent.selectOptions(screen.getByLabelText('Self-Scheduling Mode'), 'simple')
 
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled()
+    await save()
+    await waitFor(() =>
+      expect(providersApi.updateProvider).toHaveBeenCalledWith('p1', expect.objectContaining({ self_schedule_mode: 'simple' })),
+    )
   })
 
-  it('keeps each location’s own link when saving in advanced mode', async () => {
+  it('keeps each location’s own links when saving in advanced mode', async () => {
     setup({
       orgBooking: 'advanced',
       orgPhone: 'advanced',
-      rows: [link('l1', 'https://book.example/towson'), link('l2', 'https://book.example/rosedale')],
+      orgSelf: 'advanced',
+      rows: [
+        link('l1', 'https://book.example/towson', null, 'https://cal.example/towson'),
+        link('l2', 'https://book.example/rosedale', null, null),
+      ],
     })
     renderPage()
-    const field = await screen.findByLabelText('Booking link for Rosedale')
-
-    await userEvent.type(field, '2')
-    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await userEvent.type(await screen.findByLabelText('Appointment request link for Rosedale'), '2')
+    await userEvent.type(screen.getByLabelText('Self-scheduling link for Rosedale'), 'https://cal.example/rosedale')
+    await save()
 
     await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
-    const saved = Object.fromEntries(providerLocationsApi.upsertProviderLocation.mock.calls.map((c) => [c[1], c[2]]))
-    expect(saved).toEqual({ l1: 'https://book.example/towson', l2: 'https://book.example/rosedale2' })
+    expect(savedByLocation()).toEqual({
+      l1: ['https://book.example/towson', null, 'https://cal.example/towson'],
+      l2: ['https://book.example/rosedale2', null, 'https://cal.example/rosedale'],
+    })
   })
 })

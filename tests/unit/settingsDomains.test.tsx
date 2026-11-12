@@ -102,3 +102,42 @@ describe('Settings allowed domains', () => {
     expect(toast.success).toHaveBeenCalledWith('Settings saved')
   })
 })
+
+describe('Settings link modes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAuthStore.setState({
+      org: { ...org, allowed_domains: ['towsonortho.com'] } as Organization,
+      user: { id: 'u1', org_id: 'org1', role: 'owner', name: 'Liam', email: 'l@example.com' } as never,
+    })
+  })
+
+  it('names the two links as an appointment request and self-scheduling', async () => {
+    render(<SettingsPage />)
+    expect(await screen.findByLabelText('Allowed Embed Domains')).toBeInTheDocument()
+    expect(screen.getByText('Default Appointment Request Mode')).toBeInTheDocument()
+    expect(screen.getByText('Default Self-Scheduling Mode')).toBeInTheDocument()
+    expect(screen.getByText('Default Phone Mode')).toBeInTheDocument()
+  })
+
+  it('saves the default self-scheduling mode on its own', async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />)
+    const select = (await screen.findByText('Default Self-Scheduling Mode')).parentElement!.querySelector('select')!
+    expect(select).toHaveValue('simple')
+
+    await user.selectOptions(select, 'advanced')
+    await user.click(saveButton())
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        'organizations',
+        expect.objectContaining({
+          default_self_schedule_mode: 'advanced',
+          default_booking_mode: 'simple',
+          default_phone_mode: 'simple',
+        }),
+      ),
+    )
+  })
+})
