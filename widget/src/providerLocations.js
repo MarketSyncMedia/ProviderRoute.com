@@ -27,28 +27,32 @@ export function liveProviderLocations(providerLocations, offerings, providerId, 
 }
 
 /**
- * In "simple" booking or phone mode a provider has one link / one number for
- * all their locations, so every location offers the same one -- even if the
- * rows were saved with different values (the account's default mode was
- * flipped, or a location was added later). Which one stands for all is the
- * rule shared with the provider page, so the page shows what a patient gets.
- * "Advanced" leaves each location's own value alone.
+ * In "simple" mode a provider has one link / one number for all their
+ * locations, so every location offers the same one -- even if the rows were
+ * saved with different values (the account's default mode was flipped, or a
+ * location was added later). Which one stands for all is the rule shared with
+ * the provider page, so the page shows what a patient gets. "Advanced" leaves
+ * each location's own value alone. The appointment request link, the phone and
+ * the self-scheduling link each have their own mode.
  */
-export function withSharedValues(provLocs, bookingMode, phoneMode) {
-  var shareBooking = bookingMode === 'simple'
-  var sharePhone = phoneMode === 'simple'
-  if (!shareBooking && !sharePhone) return provLocs
-  var booking = shareBooking
-    ? sharedLocationValue(provLocs.map(function (pl) { return { locationId: pl.location_id, value: pl.booking_link } }))
-    : ''
-  var phone = sharePhone
-    ? sharedLocationValue(provLocs.map(function (pl) { return { locationId: pl.location_id, value: pl.phone } }))
-    : ''
+var SHARED_FIELDS = ['booking_link', 'phone', 'self_schedule_link']
+
+export function withSharedValues(provLocs, bookingMode, phoneMode, selfScheduleMode) {
+  var modes = [bookingMode, phoneMode, selfScheduleMode]
+  var shared = {}
+  var any = false
+  SHARED_FIELDS.forEach(function (field, index) {
+    if (modes[index] !== 'simple') return
+    any = true
+    shared[field] = sharedLocationValue(
+      provLocs.map(function (pl) { return { locationId: pl.location_id, value: pl[field] } })
+    )
+  })
+  if (!any) return provLocs
   return provLocs.map(function (pl) {
     var copy = {}
     for (var key in pl) copy[key] = pl[key]
-    if (shareBooking) copy.booking_link = booking || null
-    if (sharePhone) copy.phone = phone || null
+    for (var field in shared) copy[field] = shared[field] || null
     return copy
   })
 }

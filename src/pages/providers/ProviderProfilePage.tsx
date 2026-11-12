@@ -76,11 +76,108 @@ function sameIds(a: string[], b: string[]) {
   return sortedA.every((id, idx) => id === sortedB[idx])
 }
 
+type ProviderMode = 'default' | 'simple' | 'advanced'
+
+/** One of the provider's simple / advanced choices, or "use the account's". */
+function ModeSelect({
+  label,
+  value,
+  onChange,
+  simple,
+  advanced,
+}: {
+  label: string
+  value: ProviderMode
+  onChange: (value: ProviderMode) => void
+  simple: string
+  advanced: string
+}) {
+  return (
+    <div className="flex-1">
+      <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">{label}</label>
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value as ProviderMode)}
+        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+      >
+        <option value="default">Use org default</option>
+        <option value="simple">{simple}</option>
+        <option value="advanced">{advanced}</option>
+      </select>
+    </div>
+  )
+}
+
+/** The one box that stands for every location in simple mode. */
+function SharedField({
+  id,
+  label,
+  value,
+  placeholder,
+  hint,
+  warning,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: string
+  placeholder: string
+  hint?: string
+  warning: string | null
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex-1">
+      <label htmlFor={id} className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">
+        {label}
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+      />
+      {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
+      {warning ? <p className="mt-1 text-xs text-amber-700">{warning}</p> : null}
+    </div>
+  )
+}
+
+/** A per-location box in the advanced layout. */
+function LocationInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex-1">
+      <input
+        type="text"
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+      />
+    </div>
+  )
+}
+
 export default function ProviderProfilePage() {
   const { id } = useParams<{ id: string }>()
   const orgId = useAuthStore((s) => s.org?.id ?? '')
   const orgBookingMode = useAuthStore((s) => asOrgMode(s.org?.default_booking_mode))
   const orgPhoneMode = useAuthStore((s) => asOrgMode(s.org?.default_phone_mode))
+  const orgSelfScheduleMode = useAuthStore((s) => asOrgMode(s.org?.default_self_schedule_mode))
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -89,11 +186,13 @@ export default function ProviderProfilePage() {
   const [categoryIds, setCategoryIds] = useState<string[]>([])
   const [bookingMode, setBookingMode] = useState<'default' | 'simple' | 'advanced'>('default')
   const [phoneMode, setPhoneMode] = useState<'default' | 'simple' | 'advanced'>('default')
+  const [selfScheduleMode, setSelfScheduleMode] = useState<'default' | 'simple' | 'advanced'>('default')
   const [originalCategoryIds, setOriginalCategoryIds] = useState<string[]>([])
   const [isSaving, setIsSaving] = useState(false)
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
   const [bookingLinks, setBookingLinks] = useState<Record<string, string>>({})
   const [phoneLinks, setPhoneLinks] = useState<Record<string, string>>({})
+  const [selfLinks, setSelfLinks] = useState<Record<string, string>>({})
   const [modal, setModal] = useState<{
     type: 'add-offering' | 'edit-offering' | 'archive-offering' | 'archive-provider' | null
     payload?: Offering
@@ -177,6 +276,7 @@ export default function ProviderProfilePage() {
     setOriginalCategoryIds(provider.category_ids ?? [])
     setBookingMode(asProviderMode(provider.booking_mode))
     setPhoneMode(asProviderMode(provider.phone_mode))
+    setSelfScheduleMode(asProviderMode(provider.self_schedule_mode))
   }
 
   // react-hook-form's reset() is an external store write, so it stays in an
@@ -206,13 +306,16 @@ export default function ProviderProfilePage() {
   if (providerLocationsData && providerLocationsData !== syncedProviderLocations) {
     const nextBooking: Record<string, string> = {}
     const nextPhone: Record<string, string> = {}
+    const nextSelf: Record<string, string> = {}
     providerLocationsData.forEach((entry) => {
       nextBooking[entry.location_id] = entry.booking_link ?? ''
+      nextSelf[entry.location_id] = entry.self_schedule_link ?? ''
       nextPhone[entry.location_id] = formatPhone(entry.phone)
     })
     setSyncedProviderLocations(providerLocationsData)
     setBookingLinks(nextBooking)
     setPhoneLinks(nextPhone)
+    setSelfLinks(nextSelf)
   }
   const providerLocations = providerLocationsData ?? EMPTY_PROVIDER_LOCATIONS
 
@@ -269,6 +372,14 @@ export default function ProviderProfilePage() {
     return map
   }, [providerLocations])
 
+  const selfLinkBaselineByLocationId = useMemo(() => {
+    const map = new Map<string, string>()
+    providerLocations.forEach((entry) => {
+      map.set(entry.location_id, (entry.self_schedule_link ?? '').trim())
+    })
+    return map
+  }, [providerLocations])
+
   const phoneLinkBaselineByLocationId = useMemo(() => {
     const map = new Map<string, string>()
     providerLocations.forEach((entry) => {
@@ -312,6 +423,14 @@ export default function ProviderProfilePage() {
     })
   }, [offeringLocationIds, bookingLinks, bookingLinkBaselineByLocationId])
 
+  const hasSelfLinkChanges = useMemo(() => {
+    return offeringLocationIds.some((locationId) => {
+      const current = (selfLinks[locationId] ?? '').trim()
+      const baseline = selfLinkBaselineByLocationId.get(locationId) ?? ''
+      return current !== baseline
+    })
+  }, [offeringLocationIds, selfLinks, selfLinkBaselineByLocationId])
+
   const hasPhoneLinkChanges = useMemo(() => {
     return offeringLocationIds.some((locationId) => {
       const current = formatPhone(phoneLinks[locationId])
@@ -323,18 +442,23 @@ export default function ProviderProfilePage() {
   // What the provider actually uses: their own choice, or the account's default.
   const effectiveBookingMode = bookingMode === 'default' ? orgBookingMode : bookingMode
   const effectivePhoneMode = phoneMode === 'default' ? orgPhoneMode : phoneMode
+  const effectiveSelfScheduleMode = selfScheduleMode === 'default' ? orgSelfScheduleMode : selfScheduleMode
   const bookingSimple = effectiveBookingMode === 'simple'
   const phoneSimple = effectivePhoneMode === 'simple'
+  const selfSimple = effectiveSelfScheduleMode === 'simple'
 
   // In simple mode there is one link / one number for every location. They are
   // still stored per location, so the one shown is the one the widget uses
   // (see sharedLocationValue), and editing it sets every location.
   const bookingEntries = offeringLocationIds.map((locationId) => ({ locationId, value: bookingLinks[locationId] }))
   const phoneEntries = offeringLocationIds.map((locationId) => ({ locationId, value: phoneLinks[locationId] }))
+  const selfEntries = offeringLocationIds.map((locationId) => ({ locationId, value: selfLinks[locationId] }))
   const sharedBooking = sharedLocationValue(bookingEntries)
+  const sharedSelf = sharedLocationValue(selfEntries)
   const sharedPhone = sharedLocationValue(phoneEntries)
   const bookingDisagrees = bookingSimple && locationValuesDisagree(bookingEntries)
   const phoneDisagrees = phoneSimple && locationValuesDisagree(phoneEntries)
+  const selfDisagrees = selfSimple && locationValuesDisagree(selfEntries)
 
   /** Simple mode: one value, stored at every location the provider covers. */
   function setAllLocations(set: typeof setBookingLinks, value: string) {
@@ -344,11 +468,18 @@ export default function ProviderProfilePage() {
   const hasModeChanges =
     provider !== undefined &&
     provider !== null &&
-    (bookingMode !== asProviderMode(provider.booking_mode) || phoneMode !== asProviderMode(provider.phone_mode))
+    (bookingMode !== asProviderMode(provider.booking_mode) ||
+      phoneMode !== asProviderMode(provider.phone_mode) ||
+      selfScheduleMode !== asProviderMode(provider.self_schedule_mode))
 
   const hasCategoryChanges = !sameIds(categoryIds, originalCategoryIds)
   const canSave =
-    formState.isDirty || hasCategoryChanges || hasBookingLinkChanges || hasPhoneLinkChanges || hasModeChanges
+    formState.isDirty ||
+    hasCategoryChanges ||
+    hasBookingLinkChanges ||
+    hasSelfLinkChanges ||
+    hasPhoneLinkChanges ||
+    hasModeChanges
 
   const providerName = provider?.name ?? ''
   const initials = initialsForName(providerName)
@@ -367,6 +498,7 @@ export default function ProviderProfilePage() {
       category_ids: categoryIds,
       booking_mode: bookingMode,
       phone_mode: phoneMode,
+      self_schedule_mode: selfScheduleMode,
     })
 
     if (result.error) {
@@ -379,7 +511,8 @@ export default function ProviderProfilePage() {
       // Simple mode saves the one value to every location.
       const link = bookingSimple ? sharedBooking : (bookingLinks[locationId]?.trim() ?? '')
       const phone = phoneSimple ? formatPhone(sharedPhone) : formatPhone(phoneLinks[locationId])
-      const saveResult = await upsertProviderLocation(id, locationId, link || null, phone || null)
+      const selfLink = selfSimple ? sharedSelf : (selfLinks[locationId]?.trim() ?? '')
+      const saveResult = await upsertProviderLocation(id, locationId, link || null, phone || null, selfLink || null)
       if (saveResult.error) {
         toast.error(saveResult.error)
         setIsSaving(false)
@@ -705,36 +838,33 @@ export default function ProviderProfilePage() {
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-3 font-semibold text-slate-900">Booking Behavior</h2>
-        <div className="flex gap-6">
-          <div className="flex-1">
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">Booking Link Mode</label>
-            <select
-              value={bookingMode}
-              onChange={(e) => setBookingMode(e.target.value as 'default' | 'simple' | 'advanced')}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value="default">Use org default</option>
-              <option value="simple">Simple — Same link for all locations</option>
-              <option value="advanced">Advanced — Different link per location</option>
-            </select>
-          </div>
-          <div className="flex-1">
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">Phone Mode</label>
-            <select
-              value={phoneMode}
-              onChange={(e) => setPhoneMode(e.target.value as 'default' | 'simple' | 'advanced')}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value="default">Use org default</option>
-              <option value="simple">Simple — Same number for all locations</option>
-              <option value="advanced">Advanced — Different number per location</option>
-            </select>
-          </div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
+          <ModeSelect
+            label="Appointment Request Mode"
+            value={bookingMode}
+            onChange={setBookingMode}
+            simple="Simple — Same link for all locations"
+            advanced="Advanced — Different link per location"
+          />
+          <ModeSelect
+            label="Self-Scheduling Mode"
+            value={selfScheduleMode}
+            onChange={setSelfScheduleMode}
+            simple="Simple — Same link for all locations"
+            advanced="Advanced — Different link per location"
+          />
+          <ModeSelect
+            label="Phone Mode"
+            value={phoneMode}
+            onChange={setPhoneMode}
+            simple="Simple — Same number for all locations"
+            advanced="Advanced — Different number per location"
+          />
         </div>
       </div>
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 font-semibold text-slate-900">Locations &amp; Booking Links</h2>
+        <h2 className="mb-4 font-semibold text-slate-900">Locations &amp; Links</h2>
 
         {providerLocationsLoading || orgLocationsLoading || offeringsLoading ? (
           <div className="py-8">
@@ -743,63 +873,48 @@ export default function ProviderProfilePage() {
         ) : offeringLocationIds.length === 0 ? (
           <div className="py-4">
             <p className="text-sm text-slate-500">
-              No offering locations yet. Add locations to this provider&apos;s offerings to manage booking links.
+              No offering locations yet. Add locations to this provider&apos;s offerings to manage their links.
             </p>
           </div>
         ) : (
           <div className="w-full">
-            {bookingSimple || phoneSimple ? (
+            {bookingSimple || selfSimple || phoneSimple ? (
               <div className="mb-4 flex flex-col gap-4 sm:flex-row">
                 {bookingSimple ? (
-                  <div className="flex-1">
-                    <label
-                      htmlFor="shared-booking-link"
-                      className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500"
-                    >
-                      Booking link (all locations)
-                    </label>
-                    <input
-                      id="shared-booking-link"
-                      type="text"
-                      value={sharedBooking}
-                      onChange={(event) => setAllLocations(setBookingLinks, event.target.value)}
-                      placeholder="https://..."
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                    />
-                    {bookingDisagrees ? (
-                      <p className="mt-1 text-xs text-amber-700">
-                        The locations currently have different links. Saving uses this one for all of them.
-                      </p>
-                    ) : null}
-                  </div>
+                  <SharedField
+                    id="shared-booking-link"
+                    label="Appointment request link (all locations)"
+                    value={sharedBooking}
+                    placeholder="https://..."
+                    warning={bookingDisagrees ? 'The locations currently have different links. Saving uses this one for all of them.' : null}
+                    onChange={(value) => setAllLocations(setBookingLinks, value)}
+                  />
+                ) : null}
+                {selfSimple ? (
+                  <SharedField
+                    id="shared-self-schedule-link"
+                    label="Self-scheduling link (all locations)"
+                    value={sharedSelf}
+                    placeholder="https://..."
+                    hint="Leave empty to show no self-scheduling button."
+                    warning={selfDisagrees ? 'The locations currently have different links. Saving uses this one for all of them.' : null}
+                    onChange={(value) => setAllLocations(setSelfLinks, value)}
+                  />
                 ) : null}
                 {phoneSimple ? (
-                  <div className="flex-1">
-                    <label
-                      htmlFor="shared-phone"
-                      className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500"
-                    >
-                      Phone (all locations)
-                    </label>
-                    <input
-                      id="shared-phone"
-                      type="text"
-                      value={sharedPhone}
-                      onChange={(event) => setAllLocations(setPhoneLinks, event.target.value)}
-                      placeholder="(410) 555-0123"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                    />
-                    {phoneDisagrees ? (
-                      <p className="mt-1 text-xs text-amber-700">
-                        The locations currently have different numbers. Saving uses this one for all of them.
-                      </p>
-                    ) : null}
-                  </div>
+                  <SharedField
+                    id="shared-phone"
+                    label="Phone (all locations)"
+                    value={sharedPhone}
+                    placeholder="(410) 555-0123"
+                    warning={phoneDisagrees ? 'The locations currently have different numbers. Saving uses this one for all of them.' : null}
+                    onChange={(value) => setAllLocations(setPhoneLinks, value)}
+                  />
                 ) : null}
               </div>
             ) : null}
 
-            {bookingSimple && phoneSimple ? (
+            {bookingSimple && selfSimple && phoneSimple ? (
               <p className="text-xs text-slate-500">
                 Used at {offeringLocationIds.map((locationId) => locationNameById.get(locationId)).join(', ')}.
               </p>
@@ -807,7 +922,8 @@ export default function ProviderProfilePage() {
               <>
                 <div className="flex items-center gap-4 border-b border-slate-200 pb-2 text-xs uppercase tracking-wider text-slate-500">
                   <div className="w-1/4">Location</div>
-                  {bookingSimple ? null : <div className="flex-1">Booking Link</div>}
+                  {bookingSimple ? null : <div className="flex-1">Appointment Request Link</div>}
+                  {selfSimple ? null : <div className="flex-1">Self-Scheduling Link</div>}
                   {phoneSimple ? null : <div className="flex-1">Phone</div>}
                 </div>
 
@@ -826,32 +942,28 @@ export default function ProviderProfilePage() {
                         <span className="text-sm text-slate-700">{locationName}</span>
                       </div>
                       {bookingSimple ? null : (
-                        <div className="flex-1">
-                          <input
-                            type="text"
-                            aria-label={`Booking link for ${locationName}`}
-                            value={bookingLinks[locationId] ?? ''}
-                            onChange={(event) =>
-                              setBookingLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
-                            }
-                            placeholder="https://..."
-                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                          />
-                        </div>
+                        <LocationInput
+                          label={`Appointment request link for ${locationName}`}
+                          value={bookingLinks[locationId] ?? ''}
+                          placeholder="https://..."
+                          onChange={(value) => setBookingLinks((prev) => ({ ...prev, [locationId]: value }))}
+                        />
+                      )}
+                      {selfSimple ? null : (
+                        <LocationInput
+                          label={`Self-scheduling link for ${locationName}`}
+                          value={selfLinks[locationId] ?? ''}
+                          placeholder="https://..."
+                          onChange={(value) => setSelfLinks((prev) => ({ ...prev, [locationId]: value }))}
+                        />
                       )}
                       {phoneSimple ? null : (
-                        <div className="flex-1">
-                          <input
-                            type="text"
-                            aria-label={`Phone for ${locationName}`}
-                            value={phoneLinks[locationId] ?? ''}
-                            onChange={(event) =>
-                              setPhoneLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
-                            }
-                            placeholder="(410) 555-0123"
-                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                          />
-                        </div>
+                        <LocationInput
+                          label={`Phone for ${locationName}`}
+                          value={phoneLinks[locationId] ?? ''}
+                          placeholder="(410) 555-0123"
+                          onChange={(value) => setPhoneLinks((prev) => ({ ...prev, [locationId]: value }))}
+                        />
                       )}
                     </div>
                   )

@@ -791,6 +791,67 @@ describe('tenant isolation (staging Supabase RLS)', () => {
     })
   })
 
+  describe('10e. self-scheduling links and the widget buttons\' wording', () => {
+    it('stores an https self-scheduling link at a location, and clears it', async () => {
+      const { tenantA } = harness
+      const row = tenantA.records.providerLocation
+      const set = async (value: string | null) =>
+        tenantA.client.from('provider_locations').update({ self_schedule_link: value }).eq('id', row).select('self_schedule_link').single()
+
+      const stored = await set('https://cal.example/dr-smith')
+      expect(stored.error).toBeNull()
+      expect(stored.data?.self_schedule_link).toBe('https://cal.example/dr-smith')
+
+      const cleared = await set(null)
+      expect(cleared.error).toBeNull()
+      expect(cleared.data?.self_schedule_link).toBeNull()
+    })
+
+    it('keeps a self-scheduling link to https, the way every other patient-facing link is', async () => {
+      const { tenantA } = harness
+      const row = tenantA.records.providerLocation
+      for (const bad of ['http://cal.example/dr', 'javascript:alert(1)', 'https://cal.example/a b', 'cal.example/dr']) {
+        const { error } = await tenantA.client.from('provider_locations').update({ self_schedule_link: bad }).eq('id', row)
+        expect(error, bad).not.toBeNull()
+      }
+    })
+
+    it('takes only simple, advanced or the default as a provider\'s self-scheduling mode', async () => {
+      const { tenantA } = harness
+      const mode = (value: string) =>
+        tenantA.client.from('providers').update({ self_schedule_mode: value }).eq('id', tenantA.records.provider)
+
+      expect((await mode('advanced')).error).toBeNull()
+      expect((await mode('simple')).error).toBeNull()
+      expect((await mode('default')).error).toBeNull()
+      expect((await mode('sometimes')).error).not.toBeNull()
+    })
+
+    it('takes only simple or advanced as the organization\'s default self-scheduling mode', async () => {
+      const { tenantA } = harness
+      const mode = (value: string) =>
+        tenantA.client.from('organizations').update({ default_self_schedule_mode: value }).eq('id', tenantA.orgId)
+
+      expect((await mode('advanced')).error).toBeNull()
+      expect((await mode('simple')).error).toBeNull()
+      // "default" only makes sense for a provider, who falls back to this.
+      expect((await mode('default')).error).not.toBeNull()
+    })
+
+    it('limits the button wording to 40 characters, and lets it be blank', async () => {
+      const { tenantA } = harness
+      const widget = tenantA.records.widget
+      const update = (patch: Record<string, string | null>) =>
+        tenantA.client.from('widgets').update(patch).eq('id', widget)
+
+      expect((await update({ booking_button_text: 'Request an appointment', self_schedule_button_text: 'Schedule online' })).error).toBeNull()
+      expect((await update({ booking_button_text: 'x'.repeat(40) })).error).toBeNull()
+      expect((await update({ booking_button_text: 'x'.repeat(41) })).error).not.toBeNull()
+      expect((await update({ self_schedule_button_text: 'x'.repeat(41) })).error).not.toBeNull()
+      expect((await update({ booking_button_text: null, self_schedule_button_text: null })).error).toBeNull()
+    })
+  })
+
   describe('11. live widget publication requirements', () => {
     const PRIVACY_URL = 'https://example.invalid/privacy'
     const DISCLAIMER = 'Informational only, not medical advice.'
