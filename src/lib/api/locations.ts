@@ -49,41 +49,38 @@ export async function updateLocation(id: string, updates: Partial<Location>): Pr
   return { error: error?.message ?? null }
 }
 
-export async function archiveLocation(id: string, orgId: string): Promise<{ error: string | null }> {
-  const { error: deletePlError } = await supabase.from('provider_locations').delete().eq('location_id', id)
+/**
+ * Hides a location everywhere and keeps everything about it: offerings still
+ * list it and providers keep their booking links and phones there, so
+ * restoring it brings back exactly what was offered. Nothing offers a location
+ * that is archived (the widget and the admin only read live ones), and a
+ * provider whose only location is archived is simply not offered at one.
+ */
+export async function archiveLocation(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('locations').update({ is_archived: true }).eq('id', id)
 
-  if (deletePlError) {
-    return { error: deletePlError.message }
+  return { error: error?.message ?? null }
+}
+
+export async function getArchivedLocations(orgId: string): Promise<Location[]> {
+  const { data, error } = await supabase
+    .from('locations')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('is_archived', true)
+    .order('name', { ascending: true })
+
+  if (error || !data) {
+    return []
   }
 
-  // Paged: a partial read would leave the archived location still referenced
-  // on every offering past the first page.
-  const offerings = await selectAllRows<{ id: string; location_ids: string[] }>((from, to) =>
-    supabase
-      .from('offerings')
-      .select('id, location_ids')
-      .eq('org_id', orgId)
-      .contains('location_ids', [id])
-      .range(from, to),
-  )
+  return data as Location[]
+}
 
-  if (!offerings) {
-    return { error: 'Failed to load offerings for this location' }
-  }
+export async function restoreLocation(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('locations').update({ is_archived: false }).eq('id', id)
 
-  const toUpdate = offerings
-
-  for (const row of toUpdate) {
-    const next = ((row.location_ids as string[]) ?? []).filter((lid) => lid !== id)
-    const { error: upErr } = await supabase.from('offerings').update({ location_ids: next }).eq('id', row.id)
-    if (upErr) {
-      return { error: upErr.message }
-    }
-  }
-
-  const { error: archiveError } = await supabase.from('locations').update({ is_archived: true }).eq('id', id)
-
-  return { error: archiveError?.message ?? null }
+  return { error: error?.message ?? null }
 }
 
 /**
@@ -103,11 +100,15 @@ export async function getLocationOfferingCounts(
     return counts
   }
 
+  // Counts what the data table lists, which leaves out offerings of an
+  // archived provider or case type.
   const rows = await selectAllRows<{ location_ids: string[] | null }>((from, to) =>
     supabase
       .from('offerings')
-      .select('location_ids')
+      .select('location_ids, providers!inner(), case_types!inner()')
       .eq('is_archived', false)
+      .eq('providers.is_archived', false)
+      .eq('case_types.is_archived', false)
       .overlaps('location_ids', locationIds)
       .range(from, to),
   )

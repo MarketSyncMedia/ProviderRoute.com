@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Archive,
   ArchiveRestore,
   ChevronDown,
   ChevronLeft,
@@ -13,6 +14,8 @@ import {
   X,
 } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import OfferingModal from '../../components/modals/OfferingModal'
+import { emptyOfferingDraft, type OfferingDraft } from '../../components/modals/offeringDraft'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
@@ -36,19 +39,22 @@ import {
   restoreOffering,
   updateOffering,
 } from '../../lib/api/offerings'
-import { supabase } from '../../lib/supabase'
+import { getCaseTypes } from '../../lib/api/caseTypes'
+import { getCategories } from '../../lib/api/categories'
+import { getConstraints } from '../../lib/api/constraints'
+import { getLocations } from '../../lib/api/locations'
+import { constraintSummary } from '../../lib/constraintSummary'
+import { formatPhone } from '../../lib/phone'
+import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../shared/avatarPalette'
 import { readableTextColor } from '../../shared/colorContrast'
 import { useAuthStore } from '../../stores/authStore'
 import type {
-  CaseType,
-  Category,
-  Constraint,
-  Location as OrgLocation,
   Offering,
   ProviderLocation,
 } from '../../types/database'
-import { asProviderMode, asRecord, toJson } from '../../lib/schemaEnums'
+import { asOrgMode, asProviderMode, asRecord, toJson } from '../../lib/schemaEnums'
+import { locationValuesDisagree, sharedLocationValue } from '../../shared/sharedLocationValue'
 
 // Stable singleton, not a fresh `[]` literal — a per-render default would
 // change identity every render, which is exactly the bug that used to make
@@ -70,9 +76,108 @@ function sameIds(a: string[], b: string[]) {
   return sortedA.every((id, idx) => id === sortedB[idx])
 }
 
+type ProviderMode = 'default' | 'simple' | 'advanced'
+
+/** One of the provider's simple / advanced choices, or "use the account's". */
+function ModeSelect({
+  label,
+  value,
+  onChange,
+  simple,
+  advanced,
+}: {
+  label: string
+  value: ProviderMode
+  onChange: (value: ProviderMode) => void
+  simple: string
+  advanced: string
+}) {
+  return (
+    <div className="flex-1">
+      <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">{label}</label>
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value as ProviderMode)}
+        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+      >
+        <option value="default">Use org default</option>
+        <option value="simple">{simple}</option>
+        <option value="advanced">{advanced}</option>
+      </select>
+    </div>
+  )
+}
+
+/** The one box that stands for every location in simple mode. */
+function SharedField({
+  id,
+  label,
+  value,
+  placeholder,
+  hint,
+  warning,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: string
+  placeholder: string
+  hint?: string
+  warning: string | null
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex-1">
+      <label htmlFor={id} className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">
+        {label}
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+      />
+      {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
+      {warning ? <p className="mt-1 text-xs text-amber-700">{warning}</p> : null}
+    </div>
+  )
+}
+
+/** A per-location box in the advanced layout. */
+function LocationInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex-1">
+      <input
+        type="text"
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+      />
+    </div>
+  )
+}
+
 export default function ProviderProfilePage() {
   const { id } = useParams<{ id: string }>()
   const orgId = useAuthStore((s) => s.org?.id ?? '')
+  const orgBookingMode = useAuthStore((s) => asOrgMode(s.org?.default_booking_mode))
+  const orgPhoneMode = useAuthStore((s) => asOrgMode(s.org?.default_phone_mode))
+  const orgSelfScheduleMode = useAuthStore((s) => asOrgMode(s.org?.default_self_schedule_mode))
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -81,18 +186,18 @@ export default function ProviderProfilePage() {
   const [categoryIds, setCategoryIds] = useState<string[]>([])
   const [bookingMode, setBookingMode] = useState<'default' | 'simple' | 'advanced'>('default')
   const [phoneMode, setPhoneMode] = useState<'default' | 'simple' | 'advanced'>('default')
+  const [selfScheduleMode, setSelfScheduleMode] = useState<'default' | 'simple' | 'advanced'>('default')
   const [originalCategoryIds, setOriginalCategoryIds] = useState<string[]>([])
   const [isSaving, setIsSaving] = useState(false)
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
   const [bookingLinks, setBookingLinks] = useState<Record<string, string>>({})
   const [phoneLinks, setPhoneLinks] = useState<Record<string, string>>({})
+  const [selfLinks, setSelfLinks] = useState<Record<string, string>>({})
   const [modal, setModal] = useState<{
-    type: 'add-offering' | 'edit-offering' | 'delete-offering' | null
+    type: 'add-offering' | 'edit-offering' | 'archive-offering' | 'archive-provider' | null
     payload?: Offering
   }>({ type: null })
-  const [offeringCaseTypeId, setOfferingCaseTypeId] = useState('')
-  const [offeringDraftLocationIds, setOfferingDraftLocationIds] = useState<string[]>([])
-  const [offeringConstraints, setOfferingConstraints] = useState<Record<string, unknown>>({})
+  const [offeringInitial, setOfferingInitial] = useState<OfferingDraft>(() => emptyOfferingDraft())
   const [offeringError, setOfferingError] = useState('')
   const [offeringSaving, setOfferingSaving] = useState(false)
   const [archivedOpen, setArchivedOpen] = useState(false)
@@ -116,15 +221,7 @@ export default function ProviderProfilePage() {
 
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['categories', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as Category[]
-    },
+    queryFn: () => getCategories(orgId),
     enabled: Boolean(orgId),
   })
 
@@ -136,15 +233,7 @@ export default function ProviderProfilePage() {
 
   const { data: orgLocations = [], isLoading: orgLocationsLoading } = useQuery({
     queryKey: ['locations', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('locations')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as OrgLocation[]
-    },
+    queryFn: () => getLocations(orgId),
     enabled: Boolean(orgId),
   })
 
@@ -164,40 +253,30 @@ export default function ProviderProfilePage() {
 
   const { data: orgCaseTypes = [] } = useQuery({
     queryKey: ['case-types', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('case_types')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as CaseType[]
-    },
+    queryFn: () => getCaseTypes(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: orgConstraints = [] } = useQuery({
     queryKey: ['constraints', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('constraints')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as Constraint[]
-    },
+    queryFn: () => getConstraints(orgId),
     enabled: Boolean(orgId),
   })
 
   // Seed the editable copies of the fetched provider during render rather than
   // from an effect, so the form never paints one frame of the previous
-  // provider's values after navigating between profiles.
-  const [syncedProvider, setSyncedProvider] = useState(provider)
+  // provider's values after navigating between profiles. Starts empty, not at
+  // `provider`, so a provider already cached on arrival is copied too;
+  // otherwise reopening a profile within the stale time shows no categories,
+  // and saving that form would write the blanks over the real values.
+  const [syncedProvider, setSyncedProvider] = useState<typeof provider>(undefined)
   if (provider && provider !== syncedProvider) {
     setSyncedProvider(provider)
     setCategoryIds(provider.category_ids ?? [])
     setOriginalCategoryIds(provider.category_ids ?? [])
     setBookingMode(asProviderMode(provider.booking_mode))
     setPhoneMode(asProviderMode(provider.phone_mode))
+    setSelfScheduleMode(asProviderMode(provider.self_schedule_mode))
   }
 
   // react-hook-form's reset() is an external store write, so it stays in an
@@ -220,18 +299,23 @@ export default function ProviderProfilePage() {
   // that trips React's "Too many re-renders" the moment any other query on
   // this page resolves first (near-guaranteed, since there are several).
   // `undefined` stays referentially stable across renders, so gating on it
-  // being truthy (matching the syncedProvider pattern above) fixes it.
-  const [syncedProviderLocations, setSyncedProviderLocations] = useState(providerLocationsData)
+  // being truthy (matching the syncedProvider pattern above) fixes it. It
+  // starts empty for the same reason as syncedProvider: links already cached
+  // on arrival must be copied too.
+  const [syncedProviderLocations, setSyncedProviderLocations] = useState<typeof providerLocationsData>(undefined)
   if (providerLocationsData && providerLocationsData !== syncedProviderLocations) {
     const nextBooking: Record<string, string> = {}
     const nextPhone: Record<string, string> = {}
+    const nextSelf: Record<string, string> = {}
     providerLocationsData.forEach((entry) => {
       nextBooking[entry.location_id] = entry.booking_link ?? ''
-      nextPhone[entry.location_id] = entry.phone ?? ''
+      nextSelf[entry.location_id] = entry.self_schedule_link ?? ''
+      nextPhone[entry.location_id] = formatPhone(entry.phone)
     })
     setSyncedProviderLocations(providerLocationsData)
     setBookingLinks(nextBooking)
     setPhoneLinks(nextPhone)
+    setSelfLinks(nextSelf)
   }
   const providerLocations = providerLocationsData ?? EMPTY_PROVIDER_LOCATIONS
 
@@ -254,17 +338,19 @@ export default function ProviderProfilePage() {
   // Seed the offering form as the dialog is opened rather than in an effect
   // reacting to `modal`; these are the only paths that reach it.
   function openAddOffering() {
-    setOfferingCaseTypeId('')
-    setOfferingDraftLocationIds([])
-    setOfferingConstraints({})
+    setOfferingInitial(emptyOfferingDraft(id))
     setOfferingError('')
     setModal({ type: 'add-offering' })
   }
 
   function openEditOffering(target: Offering) {
-    setOfferingCaseTypeId(target.case_type_id ?? '')
-    setOfferingDraftLocationIds(target.location_ids ?? [])
-    setOfferingConstraints(asRecord(target.constraints))
+    setOfferingInitial({
+      providerId: target.provider_id,
+      caseTypeId: target.case_type_id ?? '',
+      locationIds: target.location_ids ?? [],
+      constraints: asRecord(target.constraints),
+    })
+    setOfferingError('')
     setModal({ type: 'edit-offering', payload: target })
   }
 
@@ -286,10 +372,18 @@ export default function ProviderProfilePage() {
     return map
   }, [providerLocations])
 
+  const selfLinkBaselineByLocationId = useMemo(() => {
+    const map = new Map<string, string>()
+    providerLocations.forEach((entry) => {
+      map.set(entry.location_id, (entry.self_schedule_link ?? '').trim())
+    })
+    return map
+  }, [providerLocations])
+
   const phoneLinkBaselineByLocationId = useMemo(() => {
     const map = new Map<string, string>()
     providerLocations.forEach((entry) => {
-      map.set(entry.location_id, (entry.phone ?? '').trim())
+      map.set(entry.location_id, formatPhone(entry.phone))
     })
     return map
   }, [providerLocations])
@@ -314,7 +408,9 @@ export default function ProviderProfilePage() {
         }
       })
     })
-    const ids = Array.from(set)
+    // An archived location stays on the offering (restoring it brings it back)
+    // but has nothing to manage here.
+    const ids = Array.from(set).filter((locationId) => locationNameById.has(locationId))
     ids.sort((a, b) => (locationNameById.get(a) ?? '').localeCompare(locationNameById.get(b) ?? ''))
     return ids
   }, [offerings, locationNameById])
@@ -327,16 +423,63 @@ export default function ProviderProfilePage() {
     })
   }, [offeringLocationIds, bookingLinks, bookingLinkBaselineByLocationId])
 
+  const hasSelfLinkChanges = useMemo(() => {
+    return offeringLocationIds.some((locationId) => {
+      const current = (selfLinks[locationId] ?? '').trim()
+      const baseline = selfLinkBaselineByLocationId.get(locationId) ?? ''
+      return current !== baseline
+    })
+  }, [offeringLocationIds, selfLinks, selfLinkBaselineByLocationId])
+
   const hasPhoneLinkChanges = useMemo(() => {
     return offeringLocationIds.some((locationId) => {
-      const current = (phoneLinks[locationId] ?? '').trim()
+      const current = formatPhone(phoneLinks[locationId])
       const baseline = phoneLinkBaselineByLocationId.get(locationId) ?? ''
       return current !== baseline
     })
   }, [offeringLocationIds, phoneLinks, phoneLinkBaselineByLocationId])
 
+  // What the provider actually uses: their own choice, or the account's default.
+  const effectiveBookingMode = bookingMode === 'default' ? orgBookingMode : bookingMode
+  const effectivePhoneMode = phoneMode === 'default' ? orgPhoneMode : phoneMode
+  const effectiveSelfScheduleMode = selfScheduleMode === 'default' ? orgSelfScheduleMode : selfScheduleMode
+  const bookingSimple = effectiveBookingMode === 'simple'
+  const phoneSimple = effectivePhoneMode === 'simple'
+  const selfSimple = effectiveSelfScheduleMode === 'simple'
+
+  // In simple mode there is one link / one number for every location. They are
+  // still stored per location, so the one shown is the one the widget uses
+  // (see sharedLocationValue), and editing it sets every location.
+  const bookingEntries = offeringLocationIds.map((locationId) => ({ locationId, value: bookingLinks[locationId] }))
+  const phoneEntries = offeringLocationIds.map((locationId) => ({ locationId, value: phoneLinks[locationId] }))
+  const selfEntries = offeringLocationIds.map((locationId) => ({ locationId, value: selfLinks[locationId] }))
+  const sharedBooking = sharedLocationValue(bookingEntries)
+  const sharedSelf = sharedLocationValue(selfEntries)
+  const sharedPhone = sharedLocationValue(phoneEntries)
+  const bookingDisagrees = bookingSimple && locationValuesDisagree(bookingEntries)
+  const phoneDisagrees = phoneSimple && locationValuesDisagree(phoneEntries)
+  const selfDisagrees = selfSimple && locationValuesDisagree(selfEntries)
+
+  /** Simple mode: one value, stored at every location the provider covers. */
+  function setAllLocations(set: typeof setBookingLinks, value: string) {
+    set((prev) => ({ ...prev, ...Object.fromEntries(offeringLocationIds.map((locationId) => [locationId, value])) }))
+  }
+
+  const hasModeChanges =
+    provider !== undefined &&
+    provider !== null &&
+    (bookingMode !== asProviderMode(provider.booking_mode) ||
+      phoneMode !== asProviderMode(provider.phone_mode) ||
+      selfScheduleMode !== asProviderMode(provider.self_schedule_mode))
+
   const hasCategoryChanges = !sameIds(categoryIds, originalCategoryIds)
-  const canSave = formState.isDirty || hasCategoryChanges || hasBookingLinkChanges || hasPhoneLinkChanges
+  const canSave =
+    formState.isDirty ||
+    hasCategoryChanges ||
+    hasBookingLinkChanges ||
+    hasSelfLinkChanges ||
+    hasPhoneLinkChanges ||
+    hasModeChanges
 
   const providerName = provider?.name ?? ''
   const initials = initialsForName(providerName)
@@ -355,6 +498,7 @@ export default function ProviderProfilePage() {
       category_ids: categoryIds,
       booking_mode: bookingMode,
       phone_mode: phoneMode,
+      self_schedule_mode: selfScheduleMode,
     })
 
     if (result.error) {
@@ -364,9 +508,11 @@ export default function ProviderProfilePage() {
     }
 
     for (const locationId of offeringLocationIds) {
-      const link = bookingLinks[locationId]?.trim() ?? ''
-      const phone = phoneLinks[locationId]?.trim() ?? ''
-      const saveResult = await upsertProviderLocation(id, locationId, link || null, phone || null)
+      // Simple mode saves the one value to every location.
+      const link = bookingSimple ? sharedBooking : (bookingLinks[locationId]?.trim() ?? '')
+      const phone = phoneSimple ? formatPhone(sharedPhone) : formatPhone(phoneLinks[locationId])
+      const selfLink = selfSimple ? sharedSelf : (selfLinks[locationId]?.trim() ?? '')
+      const saveResult = await upsertProviderLocation(id, locationId, link || null, phone || null, selfLink || null)
       if (saveResult.error) {
         toast.error(saveResult.error)
         setIsSaving(false)
@@ -438,49 +584,52 @@ export default function ProviderProfilePage() {
 
   async function handleArchive() {
     if (!id) return
-    const confirmed = window.confirm('Archive this provider? They will be hidden from all widgets.')
-    if (!confirmed) return
 
     const result = await archiveProvider(id)
     if (result.error) {
       toast.error(result.error)
+      setModal({ type: null })
       return
     }
 
+    // The provider's offerings drop out of the data table and every count.
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['providers', orgId] }),
+      queryClient.invalidateQueries({ queryKey: ['provider', id] }),
+      invalidateOfferingReaders(queryClient, orgId),
+    ])
     toast.success('Provider archived')
     navigate('/providers')
   }
 
-  async function handleSaveOffering() {
+  async function handleSaveOffering(draft: OfferingDraft) {
     if (!id) return
-    if (!offeringCaseTypeId) {
-      setOfferingError('Case type is required')
-      return
-    }
 
     setOfferingSaving(true)
     setOfferingError('')
+    let savedMessage = 'Offering updated'
 
     if (modal.type === 'add-offering') {
       const result = await createOffering({
         provider_id: id,
-        case_type_id: offeringCaseTypeId,
+        case_type_id: draft.caseTypeId,
         org_id: orgId,
-        location_ids: offeringDraftLocationIds,
-        constraints: offeringConstraints,
+        location_ids: draft.locationIds,
+        constraints: draft.constraints,
       })
       if (result.error) {
         setOfferingError(result.error)
         setOfferingSaving(false)
         return
       }
+      savedMessage = result.restored ? 'Archived offering restored with these details' : 'Offering added'
     }
 
     if (modal.type === 'edit-offering' && modal.payload?.id) {
       const result = await updateOffering(modal.payload.id, {
-        case_type_id: offeringCaseTypeId,
-        location_ids: offeringDraftLocationIds,
-        constraints: toJson(offeringConstraints),
+        case_type_id: draft.caseTypeId,
+        location_ids: draft.locationIds,
+        constraints: toJson(draft.constraints),
       })
       if (result.error) {
         setOfferingError(result.error)
@@ -489,10 +638,9 @@ export default function ProviderProfilePage() {
       }
     }
 
-    await queryClient.invalidateQueries({ queryKey: ['provider-offerings', id] })
-    const toastType = modal.type
+    await invalidateOfferingReaders(queryClient, orgId)
     setModal({ type: null })
-    toast.success(toastType === 'add-offering' ? 'Offering added' : 'Offering updated')
+    toast.success(savedMessage)
     setOfferingSaving(false)
   }
 
@@ -504,7 +652,7 @@ export default function ProviderProfilePage() {
       toast.error(result.error)
       return
     }
-    await queryClient.invalidateQueries({ queryKey: ['provider-offerings', id] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Offering restored')
   }
 
@@ -642,7 +790,7 @@ export default function ProviderProfilePage() {
             </div>
 
             <div className="mt-4">
-              <label className="mb-2 block text-sm font-medium text-slate-700">Specialties</label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Categories</label>
               <div className="mb-2 flex flex-wrap gap-2">
                 {categoryIds.map((categoryId) => {
                   const categoryName = categoryMap.get(categoryId)
@@ -675,7 +823,7 @@ export default function ProviderProfilePage() {
                   setCategoryIds((prev) => (prev.includes(categoryId) ? prev : [...prev, categoryId]))
                 }}
               >
-                <option value="">+ Add specialty</option>
+                <option value="">+ Add category</option>
                 {unassignedCategories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
@@ -690,40 +838,33 @@ export default function ProviderProfilePage() {
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-3 font-semibold text-slate-900">Booking Behavior</h2>
-        <ul className="mb-4 space-y-1 text-sm text-slate-500">
-          <li><span className="font-medium text-slate-700">Simple</span> — Provider uses the same booking link or phone number at every location</li>
-          <li><span className="font-medium text-slate-700">Advanced</span> — Provider has different booking links or phone numbers depending on location</li>
-        </ul>
-        <div className="flex gap-6">
-          <div className="flex-1">
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">Booking Link Mode</label>
-            <select
-              value={bookingMode}
-              onChange={(e) => setBookingMode(e.target.value as 'default' | 'simple' | 'advanced')}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value="default">Use org default</option>
-              <option value="simple">Simple — Same link for all locations</option>
-              <option value="advanced">Advanced — Different link per location</option>
-            </select>
-          </div>
-          <div className="flex-1">
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">Phone Mode</label>
-            <select
-              value={phoneMode}
-              onChange={(e) => setPhoneMode(e.target.value as 'default' | 'simple' | 'advanced')}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value="default">Use org default</option>
-              <option value="simple">Simple — Same number for all locations</option>
-              <option value="advanced">Advanced — Different number per location</option>
-            </select>
-          </div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
+          <ModeSelect
+            label="Appointment Request Mode"
+            value={bookingMode}
+            onChange={setBookingMode}
+            simple="Simple — Same link for all locations"
+            advanced="Advanced — Different link per location"
+          />
+          <ModeSelect
+            label="Self-Scheduling Mode"
+            value={selfScheduleMode}
+            onChange={setSelfScheduleMode}
+            simple="Simple — Same link for all locations"
+            advanced="Advanced — Different link per location"
+          />
+          <ModeSelect
+            label="Phone Mode"
+            value={phoneMode}
+            onChange={setPhoneMode}
+            simple="Simple — Same number for all locations"
+            advanced="Advanced — Different number per location"
+          />
         </div>
       </div>
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 font-semibold text-slate-900">Locations &amp; Booking Links</h2>
+        <h2 className="mb-4 font-semibold text-slate-900">Locations &amp; Links</h2>
 
         {providerLocationsLoading || orgLocationsLoading || offeringsLoading ? (
           <div className="py-8">
@@ -732,56 +873,103 @@ export default function ProviderProfilePage() {
         ) : offeringLocationIds.length === 0 ? (
           <div className="py-4">
             <p className="text-sm text-slate-500">
-              No offering locations yet. Add locations to this provider&apos;s offerings to manage booking links.
+              No offering locations yet. Add locations to this provider&apos;s offerings to manage their links.
             </p>
           </div>
         ) : (
           <div className="w-full">
-            <div className="flex items-center gap-4 border-b border-slate-200 pb-2 text-xs uppercase tracking-wider text-slate-500">
-              <div className="w-1/4">Location</div>
-              <div className="flex-1">Booking Link</div>
-              <div className="flex-1">Phone</div>
-            </div>
+            {bookingSimple || selfSimple || phoneSimple ? (
+              <div className="mb-4 flex flex-col gap-4 sm:flex-row">
+                {bookingSimple ? (
+                  <SharedField
+                    id="shared-booking-link"
+                    label="Appointment request link (all locations)"
+                    value={sharedBooking}
+                    placeholder="https://..."
+                    warning={bookingDisagrees ? 'The locations currently have different links. Saving uses this one for all of them.' : null}
+                    onChange={(value) => setAllLocations(setBookingLinks, value)}
+                  />
+                ) : null}
+                {selfSimple ? (
+                  <SharedField
+                    id="shared-self-schedule-link"
+                    label="Self-scheduling link (all locations)"
+                    value={sharedSelf}
+                    placeholder="https://..."
+                    hint="Leave empty to show no self-scheduling button."
+                    warning={selfDisagrees ? 'The locations currently have different links. Saving uses this one for all of them.' : null}
+                    onChange={(value) => setAllLocations(setSelfLinks, value)}
+                  />
+                ) : null}
+                {phoneSimple ? (
+                  <SharedField
+                    id="shared-phone"
+                    label="Phone (all locations)"
+                    value={sharedPhone}
+                    placeholder="(410) 555-0123"
+                    warning={phoneDisagrees ? 'The locations currently have different numbers. Saving uses this one for all of them.' : null}
+                    onChange={(value) => setAllLocations(setPhoneLinks, value)}
+                  />
+                ) : null}
+              </div>
+            ) : null}
 
-            {offeringLocationIds.map((locationId, index) => {
-              const locationName = locationNameById.get(locationId) ?? 'Unknown location'
-
-              return (
-                <div
-                  key={locationId}
-                  className={[
-                    'flex items-center gap-4 py-3',
-                    index === offeringLocationIds.length - 1 ? '' : 'border-b border-slate-100',
-                  ].join(' ')}
-                >
-                  <div className="w-1/4">
-                    <span className="text-sm text-slate-700">{locationName}</span>
-                  </div>
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={bookingLinks[locationId] ?? ''}
-                      onChange={(event) =>
-                        setBookingLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
-                      }
-                      placeholder="https://..."
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={phoneLinks[locationId] ?? ''}
-                      onChange={(event) =>
-                        setPhoneLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
-                      }
-                      placeholder="(410) 555-0123"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                    />
-                  </div>
+            {bookingSimple && selfSimple && phoneSimple ? (
+              <p className="text-xs text-slate-500">
+                Used at {offeringLocationIds.map((locationId) => locationNameById.get(locationId)).join(', ')}.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center gap-4 border-b border-slate-200 pb-2 text-xs uppercase tracking-wider text-slate-500">
+                  <div className="w-1/4">Location</div>
+                  {bookingSimple ? null : <div className="flex-1">Appointment Request Link</div>}
+                  {selfSimple ? null : <div className="flex-1">Self-Scheduling Link</div>}
+                  {phoneSimple ? null : <div className="flex-1">Phone</div>}
                 </div>
-              )
-            })}
+
+                {offeringLocationIds.map((locationId, index) => {
+                  const locationName = locationNameById.get(locationId) ?? 'Unknown location'
+
+                  return (
+                    <div
+                      key={locationId}
+                      className={[
+                        'flex items-center gap-4 py-3',
+                        index === offeringLocationIds.length - 1 ? '' : 'border-b border-slate-100',
+                      ].join(' ')}
+                    >
+                      <div className="w-1/4">
+                        <span className="text-sm text-slate-700">{locationName}</span>
+                      </div>
+                      {bookingSimple ? null : (
+                        <LocationInput
+                          label={`Appointment request link for ${locationName}`}
+                          value={bookingLinks[locationId] ?? ''}
+                          placeholder="https://..."
+                          onChange={(value) => setBookingLinks((prev) => ({ ...prev, [locationId]: value }))}
+                        />
+                      )}
+                      {selfSimple ? null : (
+                        <LocationInput
+                          label={`Self-scheduling link for ${locationName}`}
+                          value={selfLinks[locationId] ?? ''}
+                          placeholder="https://..."
+                          onChange={(value) => setSelfLinks((prev) => ({ ...prev, [locationId]: value }))}
+                        />
+                      )}
+                      {phoneSimple ? null : (
+                        <LocationInput
+                          label={`Phone for ${locationName}`}
+                          value={phoneLinks[locationId] ?? ''}
+                          placeholder="(410) 555-0123"
+                          onChange={(value) => setPhoneLinks((prev) => ({ ...prev, [locationId]: value }))}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -820,14 +1008,6 @@ export default function ProviderProfilePage() {
               const locationNames = offering.location_ids
                 .map((locationId) => locationNameById.get(locationId))
                 .filter((name): name is string => Boolean(name))
-              const constraintSummaryEntries = Object.entries(offering.constraints ?? {}).map(
-                ([key, value]) => `${key}: ${String(value)}`
-              )
-              const constraintSummary = constraintSummaryEntries.join(', ')
-              const displayConstraintSummary =
-                constraintSummary.length > 40
-                  ? `${constraintSummary.slice(0, 40)}...`
-                  : constraintSummary || '—'
 
               return (
                 <div
@@ -854,19 +1034,21 @@ export default function ProviderProfilePage() {
                       ))
                     )}
                   </div>
-                  <div className="text-sm text-slate-600">{displayConstraintSummary}</div>
+                  <div className="text-sm text-slate-600">{constraintSummary(offering.constraints, orgConstraints) || '—'}</div>
                   <div className="flex gap-2">
                     <button
                       type="button"
+                      aria-label="Edit offering"
                       onClick={() => openEditOffering(offering)}
                     >
                       <Pencil className="h-4 w-4 cursor-pointer text-slate-400 hover:text-slate-600" />
                     </button>
                     <button
                       type="button"
-                      onClick={() => setModal({ type: 'delete-offering', payload: offering })}
+                      aria-label="Archive offering"
+                      onClick={() => setModal({ type: 'archive-offering', payload: offering })}
                     >
-                      <Trash2 className="h-4 w-4 cursor-pointer text-red-300 hover:text-red-500" />
+                      <Archive className="h-4 w-4 cursor-pointer text-red-300 hover:text-red-500" />
                     </button>
                   </div>
                 </div>
@@ -909,13 +1091,6 @@ export default function ProviderProfilePage() {
                 const locationNames = offering.location_ids
                   .map((locationId) => locationNameById.get(locationId))
                   .filter((name): name is string => Boolean(name))
-                const constraintSummary = Object.entries(offering.constraints ?? {})
-                  .map(([key, value]) => `${key}: ${String(value)}`)
-                  .join(', ')
-                const displayConstraintSummary =
-                  constraintSummary.length > 40
-                    ? `${constraintSummary.slice(0, 40)}...`
-                    : constraintSummary || '—'
 
                 return (
                   <div
@@ -942,7 +1117,7 @@ export default function ProviderProfilePage() {
                         ))
                       )}
                     </div>
-                    <div className="text-sm text-slate-600">{displayConstraintSummary}</div>
+                    <div className="text-sm text-slate-600">{constraintSummary(offering.constraints, orgConstraints) || '—'}</div>
                     <div>
                       <button
                         type="button"
@@ -961,168 +1136,52 @@ export default function ProviderProfilePage() {
         ) : null}
       </div>
 
-      <button type="button" className="text-sm text-red-500 underline" onClick={handleArchive}>
+      <button
+        type="button"
+        className="text-sm text-red-500 underline"
+        onClick={() => setModal({ type: 'archive-provider' })}
+      >
         Archive Provider
       </button>
     </div>
-    {(modal.type === 'add-offering' || modal.type === 'edit-offering') && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="absolute inset-0" onMouseDown={() => setModal({ type: null })} />
-        <div
-          className="relative mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <h2 className="mb-4 text-lg font-semibold text-slate-900">
-            {modal.type === 'add-offering' ? 'Add Offering' : 'Edit Offering'}
-          </h2>
-
-          {offeringError ? (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {offeringError}
-            </div>
-          ) : null}
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Case Type</label>
-            <select
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              value={offeringCaseTypeId}
-              onChange={(e) => setOfferingCaseTypeId(e.target.value)}
-            >
-              <option value="">Select case type...</option>
-              {orgCaseTypes.map((caseType) => (
-                <option key={caseType.id} value={caseType.id}>
-                  {caseType.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-2 block text-sm font-medium text-slate-700">Locations</label>
-            <div className="space-y-2">
-              {orgLocations.map((location) => (
-                <label key={location.id} className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={offeringDraftLocationIds.includes(location.id)}
-                    onChange={(e) => {
-                      setOfferingDraftLocationIds((prev) =>
-                        e.target.checked
-                          ? [...prev, location.id]
-                          : prev.filter((existingId) => existingId !== location.id)
-                      )
-                    }}
-                  />
-                  {location.name}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {orgConstraints.length > 0 ? (
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-medium text-slate-700">Constraints</label>
-              <div className="space-y-3">
-                {orgConstraints.map((constraint) => (
-                  <div key={constraint.id}>
-                    <p className="mb-1 text-sm text-slate-700">{constraint.name}</p>
-                    {constraint.type === 'binary' ? (
-                      <label className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={offeringConstraints[constraint.mapped_key] === 1}
-                          onChange={(e) =>
-                            setOfferingConstraints((prev) => ({
-                              ...prev,
-                              [constraint.mapped_key]: e.target.checked ? 1 : 0,
-                            }))
-                          }
-                        />
-                        Enabled
-                      </label>
-                    ) : null}
-                    {constraint.type === 'range' ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="number"
-                          placeholder="Min"
-                          value={String(offeringConstraints[constraint.mapped_key] ?? '')}
-                          onChange={(e) =>
-                            setOfferingConstraints((prev) => ({
-                              ...prev,
-                              [constraint.mapped_key]: e.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Max"
-                          value={String(offeringConstraints[constraint.secondary_mapped_key ?? ''] ?? '')}
-                          onChange={(e) =>
-                            setOfferingConstraints((prev) => ({
-                              ...prev,
-                              [constraint.secondary_mapped_key ?? '']: e.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                    ) : null}
-                    {constraint.type === 'exact' ? (
-                      <input
-                        type="text"
-                        value={String(offeringConstraints[constraint.mapped_key] ?? '')}
-                        onChange={(e) =>
-                          setOfferingConstraints((prev) => ({
-                            ...prev,
-                            [constraint.mapped_key]: e.target.value,
-                          }))
-                        }
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      />
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              type="button"
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700"
-              onClick={() => setModal({ type: null })}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              disabled={offeringSaving}
-              onClick={handleSaveOffering}
-            >
-              {offeringSaving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
+    {modal.type === 'add-offering' || modal.type === 'edit-offering' ? (
+      <OfferingModal
+        title={modal.type === 'add-offering' ? 'Add Offering' : 'Edit Offering'}
+        caseTypes={orgCaseTypes}
+        locations={orgLocations}
+        constraints={orgConstraints}
+        initial={offeringInitial}
+        saving={offeringSaving}
+        error={offeringError}
+        onCancel={() => setModal({ type: null })}
+        onSave={(draft) => void handleSaveOffering(draft)}
+      />
+    ) : null}
     <ConfirmDialog
-      isOpen={modal.type === 'delete-offering'}
-      title="Remove Offering"
-      message="Remove this offering? It moves to Archived offerings below, where you can restore it."
-      confirmLabel="Remove"
+      isOpen={modal.type === 'archive-offering'}
+      title="Archive Offering"
+      message="Archive this offering? It moves to Archived offerings below, where you can restore it."
+      confirmLabel="Archive"
       confirmVariant="danger"
       onConfirm={async () => {
         const result = await archiveOffering(modal.payload!.id)
-        if (!result.error) {
-          queryClient.invalidateQueries({ queryKey: ['provider-offerings', id] })
-          toast.success('Offering removed')
+        if (result.error) {
+          toast.error(result.error)
+        } else {
+          void invalidateOfferingReaders(queryClient, orgId)
+          toast.success('Offering archived')
         }
         setModal({ type: null })
       }}
+      onCancel={() => setModal({ type: null })}
+    />
+    <ConfirmDialog
+      isOpen={modal.type === 'archive-provider'}
+      title="Archive Provider"
+      message="Archive this provider? They will be hidden from the widget and the data table. Restore them from Archived providers on the Providers page."
+      confirmLabel="Archive"
+      confirmVariant="danger"
+      onConfirm={handleArchive}
       onCancel={() => setModal({ type: null })}
     />
     </>

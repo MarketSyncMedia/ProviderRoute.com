@@ -17,10 +17,11 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Archive, GripVertical, Pencil, Plus } from 'lucide-react'
+import { Archive, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import EmptyState from '../ui/EmptyState'
 import { useToast } from '../ui/toastStore'
+import { findSimilarName } from '../../lib/similarNames'
 import { useAuthStore } from '../../stores/authStore'
 
 /**
@@ -66,6 +67,12 @@ export type SortableEntityCopy = {
   pluralLower: string
   /** Empty-state hint, e.g. "Add case types like Knee, Shoulder, Hip". */
   emptyDescription: string
+  /**
+   * For a list whose rows are really deleted rather than archived: the row's
+   * button says so and uses a trash can. The page's `archiveDialog` does the
+   * deleting.
+   */
+  removeVerb?: 'Remove'
 }
 
 type EntityRow<T> = { entity: T; offeringCount: number }
@@ -85,6 +92,7 @@ function SortableEntityRow<T extends SortableEntity>({
   entity,
   offeringCount,
   singularLower,
+  removeVerb,
   extra,
   onEdit,
   onArchive,
@@ -92,6 +100,7 @@ function SortableEntityRow<T extends SortableEntity>({
   entity: T
   offeringCount: number
   singularLower: string
+  removeVerb?: 'Remove'
   extra?: ReactNode
   onEdit: () => void
   onArchive: () => void
@@ -136,10 +145,10 @@ function SortableEntityRow<T extends SortableEntity>({
       <button
         type="button"
         className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-red-600"
-        aria-label={`Archive ${singularLower}`}
+        aria-label={`${removeVerb ?? 'Archive'} ${singularLower}`}
         onClick={onArchive}
       >
-        <Archive className="h-4 w-4" />
+        {removeVerb ? <Trash2 className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
       </button>
     </div>
   )
@@ -153,6 +162,7 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   icon,
   rowExtra,
   toolbarExtra,
+  archiveDialog,
 }: {
   /**
    * Key prefix for this page's own query; the org id is appended. Must be
@@ -174,13 +184,24 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   rowExtra?: (entity: T, all: T[]) => ReactNode
   /** Page-specific controls rendered beside the add button. */
   toolbarExtra?: (all: T[]) => ReactNode
+  /**
+   * Replaces the plain archive confirmation, for a page whose archive has
+   * choices of its own. `refresh` invalidates the same keys as every other
+   * mutation here; the dialog calls it after writing and then `close`.
+   */
+  archiveDialog?: (args: {
+    entity: T
+    offeringCount: number
+    close: () => void
+    refresh: () => Promise<void>
+  }) => ReactNode
 }) {
   const orgId = useAuthStore((s) => s.org?.id ?? '')
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
   /** Refresh this page's rows and every other view of the same entity. */
-  async function invalidateAll() {
+  async function invalidateAll(): Promise<void> {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: [queryKey, orgId] }),
       ...alsoInvalidate.map((key) => queryClient.invalidateQueries({ queryKey: [key, orgId] })),
@@ -192,6 +213,11 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   })
   const [name, setName] = useState('')
   const [formError, setFormError] = useState('')
+  // A name that is almost an existing one is probably a typo of it. The admin
+  // is told once and can save it anyway; `confirmedSimilar` is the name they
+  // have already been warned about.
+  const [similarTo, setSimilarTo] = useState<string | null>(null)
+  const [confirmedSimilar, setConfirmedSimilar] = useState('')
   const [saveLoading, setSaveLoading] = useState(false)
   const [archiveLoading, setArchiveLoading] = useState(false)
   const [items, setItems] = useState<T[]>([])
@@ -213,8 +239,10 @@ export default function SortableEntityListPage<T extends SortableEntity>({
 
   // `items` is the drag-reorderable copy of `rows`. Resyncing it during render
   // when the query returns new data — rather than from an effect — avoids
-  // painting one frame of the stale order after every refetch.
-  const [syncedRows, setSyncedRows] = useState(rows)
+  // painting one frame of the stale order after every refetch. Starts at null,
+  // not `rows`, so rows already cached on arrival are copied too; otherwise
+  // returning to this page within the stale time renders an empty list.
+  const [syncedRows, setSyncedRows] = useState<EntityRow<T>[] | null>(null)
   if (rows !== syncedRows) {
     setSyncedRows(rows)
     setItems(rows.map((r) => r.entity))
@@ -255,12 +283,16 @@ export default function SortableEntityListPage<T extends SortableEntity>({
   function openAdd() {
     setName('')
     setFormError('')
+    setSimilarTo(null)
+    setConfirmedSimilar('')
     setModal({ type: 'add' })
   }
 
   function openEdit(target: T) {
     setName(target.name)
     setFormError('')
+    setSimilarTo(null)
+    setConfirmedSimilar('')
     setModal({ type: 'edit', payload: target })
   }
 
@@ -295,6 +327,17 @@ export default function SortableEntityListPage<T extends SortableEntity>({
     const err = validateName(name)
     if (err) {
       setFormError(err)
+      return
+    }
+
+    const excludeId = modal.type === 'edit' && modal.payload ? modal.payload.id : undefined
+    const similar = findSimilarName(
+      name,
+      items.filter((e) => e.id !== excludeId).map((e) => e.name),
+    )
+    if (similar && confirmedSimilar !== name.trim()) {
+      setSimilarTo(similar.name)
+      setConfirmedSimilar(name.trim())
       return
     }
 
@@ -383,7 +426,7 @@ export default function SortableEntityListPage<T extends SortableEntity>({
           className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
           onClick={openAdd}
         >
-          <Plus className="h-4 w-4" />+ Add {copy.singular}
+          <Plus className="h-4 w-4" />Add {copy.singular}
         </button>
       </div>
 
@@ -405,24 +448,27 @@ export default function SortableEntityListPage<T extends SortableEntity>({
           }
         />
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-            {items.map((entity) => {
-              const offeringCount = rows.find((r) => r.entity.id === entity.id)?.offeringCount ?? 0
-              return (
-                <SortableEntityRow
-                  key={entity.id}
-                  entity={entity}
-                  offeringCount={offeringCount}
-                  singularLower={copy.singularLower}
-                  extra={rowExtra?.(entity, items)}
-                  onEdit={() => openEdit(entity)}
-                  onArchive={() => setModal({ type: 'archive', payload: entity })}
-                />
-              )
-            })}
-          </SortableContext>
-        </DndContext>
+        <section aria-label={copy.pluralLower}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              {items.map((entity) => {
+                const offeringCount = rows.find((r) => r.entity.id === entity.id)?.offeringCount ?? 0
+                return (
+                  <SortableEntityRow
+                    key={entity.id}
+                    entity={entity}
+                    offeringCount={offeringCount}
+                    singularLower={copy.singularLower}
+                    removeVerb={copy.removeVerb}
+                    extra={rowExtra?.(entity, items)}
+                    onEdit={() => openEdit(entity)}
+                    onArchive={() => setModal({ type: 'archive', payload: entity })}
+                  />
+                )
+              })}
+            </SortableContext>
+          </DndContext>
+        </section>
       )}
 
       {modal.type === 'add' || modal.type === 'edit' ? (
@@ -444,10 +490,23 @@ export default function SortableEntityListPage<T extends SortableEntity>({
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  setSimilarTo(null)
+                }}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
+
+            {similarTo ? (
+              <div
+                role="alert"
+                className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+              >
+                This looks like “{similarTo}”, which already exists. If it&apos;s the same, cancel and use that one.
+                Otherwise save it again to keep it.
+              </div>
+            ) : null}
 
             {formError ? (
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -470,15 +529,24 @@ export default function SortableEntityListPage<T extends SortableEntity>({
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
                 disabled={saveLoading}
               >
-                {saveLoading ? 'Saving…' : 'Save'}
+                {saveLoading ? 'Saving…' : similarTo ? 'Save anyway' : 'Save'}
               </button>
             </div>
           </div>
         </div>
       ) : null}
 
+      {archiveDialog && archivePayload
+        ? archiveDialog({
+            entity: archivePayload,
+            offeringCount: archiveOfferingCount,
+            close: () => setModal({ type: null }),
+            refresh: invalidateAll,
+          })
+        : null}
+
       <ConfirmDialog
-        isOpen={modal.type === 'archive'}
+        isOpen={modal.type === 'archive' && !archiveDialog}
         title={`Archive ${copy.singular}`}
         message={
           modal.type === 'archive' && modal.payload
