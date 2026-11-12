@@ -392,3 +392,83 @@ describe('ImportWizard preview counts', () => {
     expect(tile('Total offerings')).toBe('2')
   })
 })
+
+describe('ImportWizard self-scheduling links', () => {
+  const HEADERS_WITH_LINKS = ['provider', 'Case type', 'Request link', 'Self link']
+  const ROWS_WITH_LINKS = [
+    { provider: 'Dr. Jane Smith', 'Case type': 'Knee', 'Request link': 'https://book.example/jane', 'Self link': 'https://cal.example/jane' },
+  ]
+
+  /** The row's mapping controls: the role, then (for a per-location role) its location. */
+  const rowControls = (header: string) =>
+    within(screen.getByText(header).closest('div[class*="grid"], tr, div') as HTMLElement).getAllByRole('combobox')
+
+  async function openMapping(user: ReturnType<typeof userEvent.setup>) {
+    parse.parseFile.mockResolvedValue({
+      headers: HEADERS_WITH_LINKS,
+      rows: ROWS_WITH_LINKS,
+      errors: [],
+      rowCount: ROWS_WITH_LINKS.length,
+    })
+    renderWizard()
+    await waitFor(() => expect(orgApi.getProviders).toHaveBeenCalled())
+    await uploadFile(user)
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await mapColumn(user, 'provider', 'Provider Name')
+  }
+
+  it('offers it next to the appointment request link and the phone', async () => {
+    const user = userEvent.setup()
+    await openMapping(user)
+
+    const options = within(rowControls('Self link')[0]).getAllByRole('option').map((o) => o.textContent)
+    expect(options).toEqual(expect.arrayContaining(['Appointment Request Link', 'Self-Scheduling Link', 'Phone Number']))
+  })
+
+  it('asks which location it is for, like the other per-location columns', async () => {
+    const user = userEvent.setup()
+    orgApi.getLocations.mockResolvedValue([{ id: 'loc1', name: 'Towson', org_id: 'org1', is_archived: false }])
+    await openMapping(user)
+    expect(rowControls('Self link')).toHaveLength(1)
+
+    await mapColumn(user, 'Self link', 'Self-Scheduling Link')
+
+    const controls = rowControls('Self link')
+    expect(controls).toHaveLength(2)
+    expect(within(controls[1]).getByRole('option', { name: 'All locations' })).toBeInTheDocument()
+    expect(within(controls[1]).getByRole('option', { name: 'Towson' })).toBeInTheDocument()
+  })
+
+  it('stops asking for a location when the column is set to something else', async () => {
+    const user = userEvent.setup()
+    await openMapping(user)
+    await mapColumn(user, 'Self link', 'Self-Scheduling Link')
+    expect(rowControls('Self link')).toHaveLength(2)
+
+    await mapColumn(user, 'Self link', 'Ignore this column')
+    expect(rowControls('Self link')).toHaveLength(1)
+  })
+
+  it('hands the import the self-scheduling column with its location', async () => {
+    const user = userEvent.setup()
+    await openMapping(user)
+    await mapColumn(user, 'Request link', 'Appointment Request Link')
+    await user.selectOptions(rowControls('Request link')[1], 'All locations')
+    await mapColumn(user, 'Self link', 'Self-Scheduling Link')
+    await user.selectOptions(rowControls('Self link')[1], 'All locations')
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+
+    await user.click(await screen.findByRole('radio', { name: /^Merge/i }))
+    await user.click(screen.getByRole('button', { name: /continue/i }))
+    await user.click(await screen.findByRole('button', { name: /import|confirm|run/i }))
+
+    await waitFor(() => expect(exec.executeImportRun).toHaveBeenCalled())
+    const { mappings } = exec.executeImportRun.mock.calls[0][0]
+    expect(mappings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ excelHeader: 'Request link', role: 'booking_link', locationScope: 'all' }),
+        expect.objectContaining({ excelHeader: 'Self link', role: 'self_schedule_link', locationScope: 'all' }),
+      ]),
+    )
+  })
+})
