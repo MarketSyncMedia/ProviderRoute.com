@@ -453,6 +453,8 @@ export default function WidgetBuilderPage() {
       button_subtext: config.button_subtext ?? widget?.button_subtext ?? null,
       button_icon_type: config.button_icon_type ?? widget?.button_icon_type ?? 'none',
       button_icon_value: config.button_icon_value ?? widget?.button_icon_value ?? null,
+      booking_button_text: config.booking_button_text ?? widget?.booking_button_text ?? null,
+      self_schedule_button_text: config.self_schedule_button_text ?? widget?.self_schedule_button_text ?? null,
     }
     const { error } = await publishWidget(id, snapshot)
     setActionLoading(false)
@@ -1126,6 +1128,43 @@ export default function WidgetBuilderPage() {
                     onChange={(e) => setConfig((c) => ({ ...c, greeting_text: e.target.value }))}
                     className="w-full max-w-lg rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
+                </div>
+
+                <div>
+                  <label htmlFor="booking-button-text" className="mb-1 block text-sm font-medium text-slate-700">
+                    Appointment Request Button Text
+                  </label>
+                  <input
+                    id="booking-button-text"
+                    type="text"
+                    maxLength={40}
+                    value={config.booking_button_text ?? widget.booking_button_text ?? ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, booking_button_text: e.target.value || null }))}
+                    className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Book Now"
+                  />
+                  <p className="mt-1 max-w-lg text-xs text-slate-500">
+                    The button on each provider&apos;s result card that opens their appointment request link. Leave
+                    blank for the default wording.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="self-schedule-button-text" className="mb-1 block text-sm font-medium text-slate-700">
+                    Self-Scheduling Button Text
+                  </label>
+                  <input
+                    id="self-schedule-button-text"
+                    type="text"
+                    maxLength={40}
+                    value={config.self_schedule_button_text ?? widget.self_schedule_button_text ?? ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, self_schedule_button_text: e.target.value || null }))}
+                    className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Schedule Online"
+                  />
+                  <p className="mt-1 max-w-lg text-xs text-slate-500">
+                    Shown only for providers who have a self-scheduling link. Leave blank for the default wording.
+                  </p>
                 </div>
 
                 <div>

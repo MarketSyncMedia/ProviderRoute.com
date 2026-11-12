@@ -22,6 +22,7 @@ export type ColumnRole =
   | 'location'
   | 'constraint'
   | 'booking_link'
+  | 'self_schedule_link'
   | 'phone'
   | 'ignore'
 
@@ -66,6 +67,9 @@ const INITIAL_INLINE_CONSTRAINT = {
 // matters when a default feeds a render-time state comparison.
 const EMPTY_CONFLICTS: ConflictItem[] = []
 
+/** Columns that hold a per-location value, so they are mapped to one location or to all. */
+const LOCATION_SCOPED_ROLES: ColumnRole[] = ['booking_link', 'self_schedule_link', 'phone']
+
 const MAP_ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: '', label: '-- Select mapping --' },
   { value: 'provider_name', label: 'Provider Name' },
@@ -73,7 +77,8 @@ const MAP_ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: 'category', label: 'Category' },
   { value: 'location', label: 'Location' },
   { value: 'constraint', label: 'Constraint' },
-  { value: 'booking_link', label: 'Booking Link' },
+  { value: 'booking_link', label: 'Appointment Request Link' },
+  { value: 'self_schedule_link', label: 'Self-Scheduling Link' },
   { value: 'phone', label: 'Phone Number' },
   { value: 'ignore', label: 'Ignore this column' },
 ]
@@ -260,7 +265,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
           delete next.constraintId
           delete next.rangePosition
         }
-        if (patch.role && patch.role !== 'booking_link' && patch.role !== 'phone') {
+        if (patch.role && !LOCATION_SCOPED_ROLES.includes(patch.role)) {
           delete next.locationScope
         }
         if (patch.constraintId !== undefined) {
@@ -1240,7 +1245,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                               </div>
                             ) : null}
 
-                            {mapping.role === 'booking_link' || mapping.role === 'phone' ? (
+                            {LOCATION_SCOPED_ROLES.includes(mapping.role) ? (
                               <select
                                 value={mapping.locationScope ?? ''}
                                 onChange={(e) => updateMapping(index, { locationScope: e.target.value })}
@@ -1258,8 +1263,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
 
                             {mapping.role !== 'location' &&
                             mapping.role !== 'constraint' &&
-                            mapping.role !== 'booking_link' &&
-                            mapping.role !== 'phone' ? (
+                            !LOCATION_SCOPED_ROLES.includes(mapping.role) ? (
                               <span className="text-sm text-slate-400">—</span>
                             ) : null}
                           </td>

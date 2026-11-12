@@ -4,10 +4,8 @@ import { MapPin, Sparkles, X } from 'lucide-react'
 import { useToast } from '../../components/ui/toastStore'
 import { getCaseTypes, updateCaseTypeMapPosition, updateCaseTypeMapTag } from '../../lib/api/caseTypes'
 import {
-  BODY_MAP_SPOTS,
   bodyMapSpot,
   framePoint,
-  placementOf,
   resolveSpot,
   suggestMapTags,
   type BodyMapSpot,
@@ -20,10 +18,11 @@ import { PlaceOnMapDialog } from './PlaceOnMapDialog'
 import { useInvalidateCaseTypes } from './useInvalidateCaseTypes'
 
 /**
- * The case types page's body map section: which case type each spot on the
- * widget's body map selects, and where case types without a built-in spot sit
- * (placed by the admin). A case type with no spot still appears in the widget,
- * as a plain button under the map.
+ * The case types page's body map section: every case type that sits on the
+ * widget's body map, in one list, each movable. A case type's spot is either one
+ * of the 18 standard spots or a position the admin chose; both look and edit
+ * the same way here. A case type with no spot still appears in the widget, as a
+ * plain button under the map.
  */
 
 /** A spot's centre in outline coordinates -- the same sum the widget does. */
@@ -37,62 +36,45 @@ export function MapSpotBadge({ caseType }: { caseType: CaseType }) {
   if (!spot) return null
   return (
     <span
-      title={spot.custom ? 'On the body map at a spot you placed' : `On the body map at ${spot.label}`}
+      title={spot.custom ? 'On the body map' : `On the body map, at the standard ${spot.label} spot`}
       className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
     >
       <MapPin className="h-3 w-3" />
-      {spot.custom ? 'Body map' : spot.label}
+      Body map
     </span>
   )
 }
 
-/** The figure with every spot, filled where a case type is linked. */
+interface Placed {
+  caseType: CaseType
+  spot: BodyMapSpot
+}
+
+/** The figure with a dot for every case type on the map. */
 function BodyMapPreview({
-  holders,
-  customs,
+  placed,
   active,
   onPick,
 }: {
-  holders: Map<string, CaseType>
-  customs: CaseType[]
+  placed: Placed[]
   active: string | null
-  onPick: (tag: string) => void
+  onPick: (caseTypeId: string) => void
 }) {
   return (
     <svg
       viewBox={`0 0 ${OUTLINE_SIZE} ${OUTLINE_SIZE}`}
       role="img"
-      aria-label={`Body map preview, ${holders.size} of ${BODY_MAP_SPOTS.length} spots linked${
-        customs.length > 0 ? `, plus ${customs.length} you placed` : ''
-      }`}
+      aria-label={`Body map preview, ${placed.length} on the map`}
       className="w-full"
     >
       <path d={OUTLINE_PATH} fillRule="evenodd" className="fill-slate-300" />
-      {BODY_MAP_SPOTS.map((spot) => {
-        const { x, y } = spotPoint(spot)
-        const holder = holders.get(spot.tag)
-        return (
-          <g key={spot.tag} className="cursor-pointer" onClick={() => onPick(spot.tag)}>
-            <title>{holder ? `${spot.label}: ${holder.name}` : `${spot.label}: not linked`}</title>
-            {active === spot.tag ? <circle cx={x} cy={y} r={38} className="fill-indigo-500/25" /> : null}
-            <circle
-              cx={x}
-              cy={y}
-              r={20}
-              strokeWidth={6}
-              className={holder ? 'fill-indigo-600 stroke-white' : 'fill-white stroke-slate-400'}
-            />
-          </g>
-        )
-      })}
-      {customs.map((ct) => {
-        const spot = resolveSpot(ct)
-        if (!spot) return null
+      {placed.map(({ caseType, spot }) => {
         const { x, y } = spotPoint(spot)
         return (
-          <g key={ct.id} data-custom-spot={ct.id}>
-            <title>{`${ct.name}: placed by you`}</title>
-            <circle cx={x} cy={y} r={20} strokeWidth={6} className="fill-emerald-600 stroke-white" />
+          <g key={caseType.id} data-placed={caseType.id} className="cursor-pointer" onClick={() => onPick(caseType.id)}>
+            <title>{caseType.name}</title>
+            {active === caseType.id ? <circle cx={x} cy={y} r={38} className="fill-indigo-500/25" /> : null}
+            <circle cx={x} cy={y} r={20} strokeWidth={6} className="fill-indigo-600 stroke-white" />
           </g>
         )
       })}
@@ -100,14 +82,24 @@ function BodyMapPreview({
   )
 }
 
-/** A case type the admin placed by hand: where it is, with a way to move or remove it. */
-function CustomSpotRow({ caseType, onMove }: { caseType: CaseType; onMove: () => void }) {
+/** A case type on the map: which figure it is on, with a way to move or remove it. */
+function PlacedRow({
+  placed,
+  active,
+  onMove,
+}: {
+  placed: Placed
+  active: boolean
+  onMove: () => void
+}) {
+  const { caseType, spot } = placed
   const { toast } = useToast()
   const invalidate = useInvalidateCaseTypes()
   const [saving, setSaving] = useState(false)
 
   async function remove() {
     setSaving(true)
+    // Clears a standard spot and a chosen position alike.
     const { error } = await updateCaseTypeMapPosition(caseType.id, null)
     setSaving(false)
     await invalidate()
@@ -119,9 +111,15 @@ function CustomSpotRow({ caseType, onMove }: { caseType: CaseType; onMove: () =>
   }
 
   return (
-    <li className="flex items-center gap-2 rounded-lg px-2 py-1.5" data-custom-row={caseType.id}>
-      <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-600" />
+    <li
+      data-placed-row={caseType.id}
+      className={['flex items-center gap-2 rounded-lg px-2 py-1.5', active ? 'bg-indigo-50 ring-1 ring-indigo-200' : ''].join(
+        ' ',
+      )}
+    >
+      <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full bg-indigo-600" />
       <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{caseType.name}</span>
+      <span className="shrink-0 text-xs text-slate-400">{spot.view === 'front' ? 'Front' : 'Back'}</span>
       <button
         type="button"
         onClick={onMove}
@@ -145,114 +143,42 @@ function CustomSpotRow({ caseType, onMove }: { caseType: CaseType; onMove: () =>
   )
 }
 
-function SpotRow({
-  spot,
-  holder,
-  all,
-  active,
-  onFocus,
-}: {
-  spot: BodyMapSpot
-  holder: CaseType | undefined
-  all: CaseType[]
-  active: boolean
-  onFocus: () => void
-}) {
-  const { toast } = useToast()
-  const invalidate = useInvalidateCaseTypes()
-  const [saving, setSaving] = useState(false)
-
-  async function link(caseTypeId: string) {
-    setSaving(true)
-    // One case type per spot: the current holder is unlinked first, or the
-    // unique index rejects the second link.
-    const chosen = all.find((ct) => ct.id === caseTypeId)
-    let { error } = holder && holder.id !== caseTypeId ? await updateCaseTypeMapTag(holder.id, null) : { error: null }
-    if (!error && chosen) {
-      error = (await updateCaseTypeMapTag(chosen.id, spot.tag)).error
-    }
-    setSaving(false)
-    await invalidate()
-    if (error) {
-      toast.error(error)
-      return
-    }
-    toast.success(chosen ? `${chosen.name} linked to ${spot.label}` : `${spot.label} removed from the body map`)
-  }
-
-  return (
-    <li
-      data-spot={spot.tag}
-      className={[
-        'flex items-center gap-2 rounded-lg px-2 py-1.5',
-        active ? 'bg-indigo-50 ring-1 ring-indigo-200' : '',
-      ].join(' ')}
-    >
-      <span
-        aria-hidden
-        className={[
-          'h-2.5 w-2.5 shrink-0 rounded-full',
-          holder ? 'bg-indigo-600' : 'border border-slate-400 bg-white',
-        ].join(' ')}
-      />
-      <span className="w-24 shrink-0 text-sm font-medium text-slate-800">{spot.label}</span>
-      <select
-        aria-label={`Case type for ${spot.label}`}
-        value={holder?.id ?? ''}
-        disabled={saving}
-        onFocus={onFocus}
-        onChange={(e) => void link(e.target.value)}
-        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
-      >
-        <option value="">Not on the body map</option>
-        {all.map((ct) => {
-          const elsewhere = ct.map_tag && ct.map_tag !== spot.tag ? bodyMapSpot(ct.map_tag)?.label : undefined
-          return (
-            <option key={ct.id} value={ct.id}>
-              {elsewhere ? `${ct.name} (moves from ${elsewhere})` : ct.name}
-            </option>
-          )
-        })}
-      </select>
-      <button
-        type="button"
-        aria-label={`Remove ${spot.label} from the body map`}
-        title="Remove from the body map"
-        disabled={!holder || saving}
-        onClick={() => void link('')}
-        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 disabled:invisible"
-      >
-        <X className="h-4 w-4" />
-      </button>
-    </li>
-  )
-}
-
 export function BodyMapSection() {
   const orgId = useAuthStore((s) => s.org?.id ?? '')
   const [active, setActive] = useState<string | null>(null)
   const [placing, setPlacing] = useState<string | null>(null)
   // The plain list, shared with the other pages that read CaseType[]; the
   // list above invalidates it after every add, rename, reorder or archive.
+  // It holds live case types only, so an archived one never shows here.
   const { data: caseTypes = [] } = useQuery({
     queryKey: ['case-types', orgId],
     queryFn: () => getCaseTypes(orgId),
     enabled: Boolean(orgId),
+    // Always read fresh when the page opens, so a case type archived elsewhere
+    // drops off the map instead of lingering for the cache lifetime.
+    refetchOnMount: 'always',
   })
 
-  if (caseTypes.length === 0) return null
+  const live = caseTypes.filter((ct) => !ct.is_archived)
+  if (live.length === 0) return null
 
-  const holders = new Map(
-    caseTypes.filter((ct) => bodyMapSpot(ct.map_tag)).map((ct) => [ct.map_tag as string, ct]),
-  )
-  // Case types the admin placed themselves, and the ones with no spot at all.
-  const customs = caseTypes.filter((ct) => !bodyMapSpot(ct.map_tag) && placementOf(ct))
-  const offMap = caseTypes.filter((ct) => !bodyMapSpot(ct.map_tag) && !placementOf(ct))
+  // Everything on the map, standard or chosen, front figure first.
+  const placed: Placed[] = live
+    .flatMap((ct) => {
+      const spot = resolveSpot(ct)
+      return spot ? [{ caseType: ct, spot }] : []
+    })
+    .sort(
+      (a, b) =>
+        (a.spot.view === b.spot.view ? 0 : a.spot.view === 'front' ? -1 : 1) ||
+        a.caseType.name.localeCompare(b.caseType.name),
+    )
+  const offMap = live.filter((ct) => !resolveSpot(ct))
   const placingCaseType = caseTypes.find((ct) => ct.id === placing)
 
-  function pick(tag: string) {
-    setActive(tag)
-    document.querySelector<HTMLSelectElement>(`[data-spot="${tag}"] select`)?.focus()
+  function pick(caseTypeId: string) {
+    setActive(caseTypeId)
+    document.querySelector<HTMLElement>(`[data-placed-row="${caseTypeId}"]`)?.scrollIntoView?.({ block: 'nearest' })
   }
 
   return (
@@ -263,58 +189,42 @@ export function BodyMapSection() {
             Body map
           </h2>
           <p className="mt-1 max-w-xl text-sm text-slate-500">
-            Choose which case type each spot on the widget&apos;s body map opens. A case type with no spot of its own
-            can be placed anywhere on the figure. Removing one only takes it off the figure; the case type still shows
-            as a button under it. To hide a case type everywhere, archive it above.
+            Every case type can sit anywhere on the widget&apos;s body map. Move one to change where patients tap, or
+            start a new one from a standard spot. Removing one only takes it off the figure; the case type still shows as
+            a button under it. To hide a case type everywhere, archive it above.
           </p>
         </div>
-        <SuggestMapTagsButton all={caseTypes} />
+        <SuggestMapTagsButton all={live} />
       </div>
 
       <div className="grid gap-6 md:grid-cols-[minmax(0,240px)_1fr]">
         <div className="mx-auto w-full max-w-[240px]">
-          <BodyMapPreview holders={holders} customs={customs} active={active} onPick={pick} />
+          <BodyMapPreview placed={placed} active={active} onPick={pick} />
           <p className="mt-2 text-center text-xs text-slate-500">
-            {holders.size} of {BODY_MAP_SPOTS.length} spots linked
-            {customs.length > 0 ? `, plus ${customs.length} you placed` : ''}
+            {placed.length} of {live.length} case types on the map
           </p>
         </div>
 
-        <div className="grid gap-x-6 gap-y-4 lg:grid-cols-2">
-          {(['front', 'back'] as const).map((view) => (
-            <div key={view}>
-              <h3 className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {view === 'front' ? 'Front' : 'Back'}
-              </h3>
-              <ul className="space-y-0.5">
-                {BODY_MAP_SPOTS.filter((spot) => spot.view === view).map((spot) => (
-                  <SpotRow
-                    key={spot.tag}
-                    spot={spot}
-                    holder={holders.get(spot.tag)}
-                    all={caseTypes}
-                    active={active === spot.tag}
-                    onFocus={() => setActive(spot.tag)}
-                  />
-                ))}
-              </ul>
-            </div>
-          ))}
+        <div>
+          <h3 className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            On the body map ({placed.length})
+          </h3>
+          {placed.length > 0 ? (
+            <ul className="grid gap-x-6 gap-y-0.5 lg:grid-cols-2">
+              {placed.map((p) => (
+                <PlacedRow
+                  key={p.caseType.id}
+                  placed={p}
+                  active={active === p.caseType.id}
+                  onMove={() => setPlacing(p.caseType.id)}
+                />
+              ))}
+            </ul>
+          ) : (
+            <p className="px-2 text-sm text-slate-500">Nothing is on the map yet. Place a case type below.</p>
+          )}
         </div>
       </div>
-
-      {customs.length > 0 ? (
-        <div className="mt-5 border-t border-slate-100 pt-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Placed by you ({customs.length})
-          </h3>
-          <ul className="mt-1 grid gap-x-6 sm:grid-cols-2">
-            {customs.map((ct) => (
-              <CustomSpotRow key={ct.id} caseType={ct} onMove={() => setPlacing(ct.id)} />
-            ))}
-          </ul>
-        </div>
-      ) : null}
 
       {offMap.length > 0 ? (
         <div className="mt-5 border-t border-slate-100 pt-4">
@@ -346,7 +256,7 @@ export function BodyMapSection() {
         <PlaceOnMapDialog
           key={placingCaseType.id}
           caseType={placingCaseType}
-          all={caseTypes}
+          all={live}
           onClose={() => setPlacing(null)}
         />
       ) : null}

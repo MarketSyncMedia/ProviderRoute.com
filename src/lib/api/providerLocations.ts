@@ -18,7 +18,9 @@ export async function upsertProviderLocation(
   providerId: string,
   locationId: string,
   bookingLink: string | null,
-  phone: string | null
+  phone: string | null,
+  // Left out, the stored self-scheduling link is untouched.
+  selfScheduleLink?: string | null
 ): Promise<{ error: string | null }> {
   const { error } = await supabase.from('provider_locations').upsert(
     {
@@ -26,6 +28,7 @@ export async function upsertProviderLocation(
       location_id: locationId,
       booking_link: bookingLink,
       phone: phone,
+      ...(selfScheduleLink === undefined ? {} : { self_schedule_link: selfScheduleLink }),
     },
     { onConflict: 'provider_id,location_id' }
   )

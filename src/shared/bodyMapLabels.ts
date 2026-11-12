@@ -11,7 +11,8 @@
  * (see resolveSpot in bodyMap.ts).
  */
 
-import { framePoint, labelLines, type BodyMapSpot } from './bodyMap'
+import { LABEL_MAX, LABEL_MIN, framePoint, labelLines, type BodyMapSpot, type MapPlacement } from './bodyMap'
+import { VIEW_FRAMES } from './bodyOutline'
 
 /** Label text size, in outline units (about 12-13px at the widget's width). */
 export const LABEL_SIZE = 46
@@ -60,4 +61,26 @@ export function labelLayout(spot: BodyMapSpot): LabelSlot {
   }
   const right = spot.x < 60
   return { x: p.x + (right ? 40 : -40), y: p.y + 14, anchor: right ? 'start' : 'end', lines }
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100
+const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n))
+
+/**
+ * A standard spot written as a custom placement: the same dot, and the label
+ * where the widget draws it, as percents of that figure. This is how an admin
+ * moves a standard spot -- the case type keeps this look but now stores its own
+ * position, so the change belongs to that organization alone.
+ */
+export function spotPlacement(spot: BodyMapSpot): MapPlacement {
+  const slot = BODY_MAP_LABELS[spot.tag]
+  if (!slot) return { view: spot.view, x: spot.x, y: spot.y, labelX: null, labelY: null }
+  const frame = VIEW_FRAMES[spot.view]
+  return {
+    view: spot.view,
+    x: spot.x,
+    y: spot.y,
+    labelX: round2(clamp(((slot.x - frame.x) / frame.width) * 100, LABEL_MIN, LABEL_MAX)),
+    labelY: round2(clamp(((slot.y - frame.y) / frame.height) * 100, LABEL_MIN, LABEL_MAX)),
+  }
 }

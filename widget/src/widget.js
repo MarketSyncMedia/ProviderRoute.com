@@ -1,7 +1,8 @@
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../src/shared/avatarPalette'
 import { readableTextColor } from '../../src/shared/colorContrast'
 import { bodyMapStyles, buildBodyMap } from './bodyMap'
-import { liveProviderLocations } from './providerLocations'
+import { BOOKING_WORDS, SELF_SCHEDULE_WORDS, linkButtonLabel, linkSlideHeader, planLinkAction } from './linkAction'
+import { liveProviderLocations, withSharedValues } from './providerLocations'
 
 ;(function () {
   'use strict'
@@ -1421,13 +1422,21 @@ import { liveProviderLocations } from './providerLocations'
       var orgPhoneMode = config.default_phone_mode || 'simple'
       var bookingMode = provider.booking_mode === 'default' ? orgBookingMode : (provider.booking_mode || orgBookingMode)
       var phoneMode = provider.phone_mode === 'default' ? orgPhoneMode : (provider.phone_mode || orgPhoneMode)
+      var orgSelfScheduleMode = config.default_self_schedule_mode || 'simple'
+      var selfScheduleMode = provider.self_schedule_mode === 'default' ? orgSelfScheduleMode : (provider.self_schedule_mode || orgSelfScheduleMode)
 
       // Get provider locations
-      var provLocs = liveProviderLocations(
-        this.data.providerLocations,
-        this.data.offerings,
-        provider.id,
-        this.state.selectedCaseTypeId
+      // In simple mode every location offers the one shared link / number.
+      var provLocs = withSharedValues(
+        liveProviderLocations(
+          this.data.providerLocations,
+          this.data.offerings,
+          provider.id,
+          this.state.selectedCaseTypeId
+        ),
+        bookingMode,
+        phoneMode,
+        selfScheduleMode
       )
 
       // Build card
@@ -1541,78 +1550,74 @@ import { liveProviderLocations } from './providerLocations'
       var defaultPanel = document.createElement('div')
       defaultPanel.style.cssText = 'display:flex;flex-direction:column;gap:6px;'
 
-      // --- BOOKING BUTTON ---
-      var bookingLocsWithLinks = provLocs.filter(function (pl) { return pl.booking_link })
+      // --- APPOINTMENT REQUEST AND SELF-SCHEDULING BUTTONS ---
+      // Two links, each per location and each following its own simple /
+      // advanced mode. A button appears only where the provider has that link,
+      // and says what the admin wrote for it in the widget's settings.
+      var linkSlides = []
+      ;[
+        { key: 'booking_link', mode: bookingMode, text: config.booking_button_text, words: BOOKING_WORDS },
+        { key: 'self_schedule_link', mode: selfScheduleMode, text: config.self_schedule_button_text, words: SELF_SCHEDULE_WORDS },
+      ].forEach(function (kind) {
+        var action = planLinkAction(provLocs, kind.key, kind.mode, self.state.selectedLocationId)
+        if (action.type === 'none') return
 
-      if (this.state.selectedLocationId) {
-        var selectedPl = provLocs.find(function (pl) { return pl.location_id === self.state.selectedLocationId })
-        var selectedLoc = (this.data.locations || []).find(function (l) { return l.id === self.state.selectedLocationId })
-        if (selectedPl && selectedPl.booking_link) {
-          var bookBtn = document.createElement('a')
-          bookBtn.className = 'pm-book'
-          bookBtn.href = selectedPl.booking_link
-          bookBtn.target = '_blank'
-          bookBtn.rel = 'noopener noreferrer'
-          bookBtn.textContent = 'Book at ' + (selectedLoc ? selectedLoc.name : 'Location')
-          bookBtn.onclick = function () {
-            self.trackClick(provider.id)
-            self.trackEvent('booking_clicked')
-          }
-          defaultPanel.appendChild(bookBtn)
-        } else if (bookingLocsWithLinks.length && (bookingLocsWithLinks.length === 1 || bookingMode === 'simple')) {
-          var firstPlFallback = bookingLocsWithLinks[0]
-          if (firstPlFallback) {
-            var firstLocFallback = (this.data.locations || []).find(function (l) { return l.id === firstPlFallback.location_id })
-            var bookBtnFallback = document.createElement('a')
-            bookBtnFallback.className = 'pm-book'
-            bookBtnFallback.href = firstPlFallback.booking_link
-            bookBtnFallback.target = '_blank'
-            bookBtnFallback.rel = 'noopener noreferrer'
-            bookBtnFallback.textContent = bookingLocsWithLinks.length === 1 ? 'Book at ' + (firstLocFallback ? firstLocFallback.name : 'Location') : 'Book Now'
-            bookBtnFallback.onclick = function () {
-              self.trackClick(provider.id)
-              self.trackEvent('booking_clicked')
-            }
-            defaultPanel.appendChild(bookBtnFallback)
-          }
-        } else if (bookingLocsWithLinks.length > 1) {
-          var bookTriggerFallback = document.createElement('button')
-          bookTriggerFallback.className = 'pm-book'
-          bookTriggerFallback.textContent = 'Book Now'
-          bookTriggerFallback.onclick = function () {
-            self.trackEvent('booking_options_opened')
-            defaultPanel.style.display = 'none'
-            bookSlide.style.display = 'flex'
-          }
-          defaultPanel.appendChild(bookTriggerFallback)
+        // Self-scheduling counts as a booking in the funnel, like the request link.
+        function trackBooking() {
+          self.trackClick(provider.id)
+          self.trackEvent('booking_clicked')
         }
-      } else if (bookingLocsWithLinks.length && (bookingLocsWithLinks.length === 1 || bookingMode === 'simple')) {
-        var firstPl = bookingLocsWithLinks[0]
-        if (firstPl) {
-          var firstLoc = (this.data.locations || []).find(function (l) { return l.id === firstPl.location_id })
-          var bookBtn2 = document.createElement('a')
-          bookBtn2.className = 'pm-book'
-          bookBtn2.href = firstPl.booking_link
-          bookBtn2.target = '_blank'
-          bookBtn2.rel = 'noopener noreferrer'
-          bookBtn2.textContent = bookingLocsWithLinks.length === 1 ? 'Book at ' + (firstLoc ? firstLoc.name : 'Location') : 'Book Now'
-          bookBtn2.onclick = function () {
-            self.trackClick(provider.id)
-            self.trackEvent('booking_clicked')
-          }
-          defaultPanel.appendChild(bookBtn2)
+
+        if (action.type === 'link') {
+          var linkLoc = (self.data.locations || []).find(function (l) { return l.id === action.locationId })
+          var linkBtn = document.createElement('a')
+          linkBtn.className = 'pm-book'
+          linkBtn.href = action.url
+          linkBtn.target = '_blank'
+          linkBtn.rel = 'noopener noreferrer'
+          linkBtn.textContent = linkButtonLabel(kind.text, kind.words, action.atLocation, linkLoc ? linkLoc.name : null)
+          linkBtn.onclick = trackBooking
+          defaultPanel.appendChild(linkBtn)
+          return
         }
-      } else if (bookingLocsWithLinks.length > 1) {
-        var bookTrigger = document.createElement('button')
-        bookTrigger.className = 'pm-book'
-        bookTrigger.textContent = 'Book Now'
-        bookTrigger.onclick = function () {
+
+        var chooseSlide = document.createElement('div')
+        chooseSlide.style.cssText = 'display:none;flex-direction:column;gap:6px;'
+        var chooseLabel = document.createElement('div')
+        chooseLabel.style.cssText = 'font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;text-align:center;'
+        chooseLabel.textContent = linkSlideHeader(kind.text, kind.words)
+        chooseSlide.appendChild(chooseLabel)
+        action.options.forEach(function (option) {
+          var optionLoc = (self.data.locations || []).find(function (l) { return l.id === option.locationId })
+          var optionBtn = document.createElement('a')
+          optionBtn.className = 'pm-book'
+          optionBtn.href = option.url
+          optionBtn.target = '_blank'
+          optionBtn.rel = 'noopener noreferrer'
+          optionBtn.textContent = optionLoc ? optionLoc.name : 'Location'
+          optionBtn.onclick = trackBooking
+          chooseSlide.appendChild(optionBtn)
+        })
+        var chooseBack = document.createElement('button')
+        chooseBack.className = 'pm-back-link'
+        chooseBack.textContent = '← back'
+        chooseBack.onclick = function () {
+          chooseSlide.style.display = 'none'
+          defaultPanel.style.display = 'flex'
+        }
+        chooseSlide.appendChild(chooseBack)
+        linkSlides.push(chooseSlide)
+
+        var chooseTrigger = document.createElement('button')
+        chooseTrigger.className = 'pm-book'
+        chooseTrigger.textContent = linkButtonLabel(kind.text, kind.words, false)
+        chooseTrigger.onclick = function () {
           self.trackEvent('booking_options_opened')
           defaultPanel.style.display = 'none'
-          bookSlide.style.display = 'flex'
+          chooseSlide.style.display = 'flex'
         }
-        defaultPanel.appendChild(bookTrigger)
-      }
+        defaultPanel.appendChild(chooseTrigger)
+      })
 
       // --- PHONE BUTTON ---
       var phoneLocsWithNumbers = provLocs.filter(function (pl) { return pl.phone })
@@ -1681,36 +1686,8 @@ import { liveProviderLocations } from './providerLocations'
 
       actionsArea.appendChild(defaultPanel)
 
-      // --- BOOKING SLIDE ---
-      var bookSlide = document.createElement('div')
-      bookSlide.style.cssText = 'display:none;flex-direction:column;gap:6px;'
-      var bookLabel = document.createElement('div')
-      bookLabel.style.cssText = 'font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;text-align:center;'
-      bookLabel.textContent = 'Book at...'
-      bookSlide.appendChild(bookLabel)
-      bookingLocsWithLinks.forEach(function (pl) {
-        var loc = (self.data.locations || []).find(function (l) { return l.id === pl.location_id })
-        var btn = document.createElement('a')
-        btn.className = 'pm-book'
-        btn.href = pl.booking_link
-        btn.target = '_blank'
-        btn.rel = 'noopener noreferrer'
-        btn.textContent = loc ? loc.name : 'Location'
-        btn.onclick = function () {
-          self.trackClick(provider.id)
-          self.trackEvent('booking_clicked')
-        }
-        bookSlide.appendChild(btn)
-      })
-      var bookBack = document.createElement('button')
-      bookBack.className = 'pm-back-link'
-      bookBack.textContent = '← back'
-      bookBack.onclick = function () {
-        bookSlide.style.display = 'none'
-        defaultPanel.style.display = 'flex'
-      }
-      bookSlide.appendChild(bookBack)
-      actionsArea.appendChild(bookSlide)
+      // --- APPOINTMENT REQUEST / SELF-SCHEDULING SLIDES ---
+      linkSlides.forEach(function (slide) { actionsArea.appendChild(slide) })
 
       // --- CALL SLIDE ---
       var callSlide = document.createElement('div')
@@ -1741,7 +1718,7 @@ import { liveProviderLocations } from './providerLocations'
       callSlide.appendChild(callBack)
       actionsArea.appendChild(callSlide)
 
-      if (defaultPanel.children.length > 0 || bookingLocsWithLinks.length > 1 || phoneLocsWithNumbers.length > 1) {
+      if (defaultPanel.children.length > 0 || linkSlides.length > 0 || phoneLocsWithNumbers.length > 1) {
         card.appendChild(actionsArea)
       }
 

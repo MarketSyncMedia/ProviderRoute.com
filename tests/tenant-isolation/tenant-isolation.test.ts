@@ -791,6 +791,189 @@ describe('tenant isolation (staging Supabase RLS)', () => {
     })
   })
 
+  describe('10e. self-scheduling links and the widget buttons\' wording', () => {
+    // Tenant A's fixtures have no provider_locations row, so these write their own
+    // (the harness removes provider_locations before providers on cleanup).
+    const setSelfScheduleLink = (value: string | null) =>
+      harness.tenantA.client
+        .from('provider_locations')
+        .upsert(
+          {
+            provider_id: harness.tenantA.records.provider,
+            location_id: harness.tenantA.records.location,
+            self_schedule_link: value,
+          },
+          { onConflict: 'provider_id,location_id' },
+        )
+        .select('self_schedule_link')
+        .single()
+
+    it('stores an https self-scheduling link at a location, and clears it', async () => {
+      const stored = await setSelfScheduleLink('https://cal.example/dr-smith')
+      expect(stored.error).toBeNull()
+      expect(stored.data?.self_schedule_link).toBe('https://cal.example/dr-smith')
+
+      const cleared = await setSelfScheduleLink(null)
+      expect(cleared.error).toBeNull()
+      expect(cleared.data?.self_schedule_link).toBeNull()
+    })
+
+    it('keeps a self-scheduling link to https, the way every other patient-facing link is', async () => {
+      for (const bad of ['http://cal.example/dr', 'javascript:alert(1)', 'https://cal.example/a b', 'cal.example/dr']) {
+        const { error } = await setSelfScheduleLink(bad)
+        expect(error, bad).not.toBeNull()
+      }
+    })
+
+    it('takes only simple, advanced or the default as a provider\'s self-scheduling mode', async () => {
+      const { tenantA } = harness
+      const mode = (value: string) =>
+        tenantA.client.from('providers').update({ self_schedule_mode: value }).eq('id', tenantA.records.provider)
+
+      expect((await mode('advanced')).error).toBeNull()
+      expect((await mode('simple')).error).toBeNull()
+      expect((await mode('default')).error).toBeNull()
+      expect((await mode('sometimes')).error).not.toBeNull()
+    })
+
+    it('takes only simple or advanced as the organization\'s default self-scheduling mode', async () => {
+      const { tenantA } = harness
+      const mode = (value: string) =>
+        tenantA.client.from('organizations').update({ default_self_schedule_mode: value }).eq('id', tenantA.orgId)
+
+      expect((await mode('advanced')).error).toBeNull()
+      expect((await mode('simple')).error).toBeNull()
+      // "default" only makes sense for a provider, who falls back to this.
+      expect((await mode('default')).error).not.toBeNull()
+    })
+
+    it('limits the button wording to 40 characters, and lets it be blank', async () => {
+      const { tenantA } = harness
+      const widget = tenantA.records.widget
+      const update = (patch: Record<string, string | null>) =>
+        tenantA.client.from('widgets').update(patch).eq('id', widget)
+
+      expect((await update({ booking_button_text: 'Request an appointment', self_schedule_button_text: 'Schedule online' })).error).toBeNull()
+      expect((await update({ booking_button_text: 'x'.repeat(40) })).error).toBeNull()
+      expect((await update({ booking_button_text: 'x'.repeat(41) })).error).not.toBeNull()
+      expect((await update({ self_schedule_button_text: 'x'.repeat(41) })).error).not.toBeNull()
+      expect((await update({ booking_button_text: null, self_schedule_button_text: null })).error).toBeNull()
+    })
+  })
+
+  describe('10f. imported self-scheduling links', () => {
+    const keyOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+
+    /** An import of one provider at tenant A's location, with a self-scheduling column when `self` is given. */
+    function linkImport(name: string, caseType: string, links: { self?: string | null; request?: string | null }, extra: Record<string, unknown> = {}) {
+      const mappings: Record<string, unknown>[] = [
+        { excelHeader: 'Provider', role: 'provider_name' },
+        { excelHeader: 'Case Type', role: 'case_type' },
+        { excelHeader: 'Towson', role: 'location', locationId: harness.tenantA.records.location },
+      ]
+      const row: Record<string, string> = { Provider: name, 'Case Type': caseType, Towson: 'yes' }
+      if (links.request !== undefined) {
+        mappings.push({ excelHeader: 'Request', role: 'booking_link', locationScope: 'all' })
+        row.Request = links.request ?? ''
+      }
+      if (links.self !== undefined) {
+        mappings.push({ excelHeader: 'Self', role: 'self_schedule_link', locationScope: 'all' })
+        row.Self = links.self ?? ''
+      }
+      return importPayload(name, caseType, {
+        headers: Object.keys(row),
+        mappings,
+        rows: [row],
+        ...extra,
+      })
+    }
+
+    async function providerIdOf(name: string) {
+      const { data, error } = await harness.tenantA.client.from('providers').select('id').eq('normalized_name', keyOf(name)).single()
+      expect(error).toBeNull()
+      return data!.id as string
+    }
+
+    async function linksOf(providerId: string) {
+      const { data, error } = await harness.tenantA.client
+        .from('provider_locations')
+        .select('booking_link,self_schedule_link')
+        .eq('provider_id', providerId)
+        .single()
+      expect(error).toBeNull()
+      return data
+    }
+
+    it('saves a self-scheduling link at the location the row is at', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Provider ${runId}`
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Link Case ${runId}`, { request: 'https://book.example/dr', self: 'https://cal.example/dr' }),
+      })
+      expect(error).toBeNull()
+      expect(await linksOf(await providerIdOf(name))).toEqual({
+        booking_link: 'https://book.example/dr',
+        self_schedule_link: 'https://cal.example/dr',
+      })
+    })
+
+    it('leaves a self-scheduling link alone when a later import has no such column', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Keep ${runId}`
+      await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Keep Case ${runId}`, { request: 'https://book.example/one', self: 'https://cal.example/keep' }),
+      })
+      const providerId = await providerIdOf(name)
+
+      // The same provider again, as an import that predates the column would send it.
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Keep Case ${runId}`, { request: 'https://book.example/two' }, {
+          conflicts: [{ rowIndex: 0, existingProviderId: providerId }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect(await linksOf(providerId)).toEqual({
+        booking_link: 'https://book.example/two',
+        self_schedule_link: 'https://cal.example/keep',
+      })
+    })
+
+    it('clears it when the file maps the column and the cell is blank', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Clear ${runId}`
+      await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Clear Case ${runId}`, { self: 'https://cal.example/clear' }),
+      })
+      const providerId = await providerIdOf(name)
+
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Clear Case ${runId}`, { self: '' }, {
+          conflicts: [{ rowIndex: 0, existingProviderId: providerId }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect((await linksOf(providerId))?.self_schedule_link).toBeNull()
+    })
+
+    it('rejects a self-scheduling link that is not https, and imports nothing', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Http ${runId}`
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Http Case ${runId}`, { self: 'http://cal.example/dr' }),
+      })
+      expect(error).not.toBeNull()
+      expect(error?.message).toContain('Self-scheduling links must use HTTPS')
+
+      const { count } = await tenantA.client
+        .from('providers')
+        .select('id', { count: 'exact', head: true })
+        .eq('normalized_name', keyOf(name))
+      expect(count).toBe(0)
+    })
+  })
+
   describe('11. live widget publication requirements', () => {
     const PRIVACY_URL = 'https://example.invalid/privacy'
     const DISCLAIMER = 'Informational only, not medical advice.'
