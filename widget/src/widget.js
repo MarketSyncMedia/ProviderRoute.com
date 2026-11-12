@@ -1,7 +1,7 @@
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../src/shared/avatarPalette'
 import { readableTextColor } from '../../src/shared/colorContrast'
 import { bodyMapStyles, buildBodyMap } from './bodyMap'
-import { liveProviderLocations } from './providerLocations'
+import { liveProviderLocations, withSharedValues } from './providerLocations'
 
 ;(function () {
   'use strict'
@@ -1423,11 +1423,16 @@ import { liveProviderLocations } from './providerLocations'
       var phoneMode = provider.phone_mode === 'default' ? orgPhoneMode : (provider.phone_mode || orgPhoneMode)
 
       // Get provider locations
-      var provLocs = liveProviderLocations(
-        this.data.providerLocations,
-        this.data.offerings,
-        provider.id,
-        this.state.selectedCaseTypeId
+      // In simple mode every location offers the one shared link / number.
+      var provLocs = withSharedValues(
+        liveProviderLocations(
+          this.data.providerLocations,
+          this.data.offerings,
+          provider.id,
+          this.state.selectedCaseTypeId
+        ),
+        bookingMode,
+        phoneMode
       )
 
       // Build card
