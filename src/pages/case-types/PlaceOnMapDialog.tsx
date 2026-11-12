@@ -3,8 +3,10 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react'
 import { useToast } from '../../components/ui/toastStore'
 import { updateCaseTypeMapPosition } from '../../lib/api/caseTypes'
 import {
+  BODY_MAP_SPOTS,
   LABEL_MAX,
   LABEL_MIN,
+  bodyMapSpot,
   dotAt,
   framePoint,
   labelAtPoint,
@@ -13,7 +15,7 @@ import {
   type BodyMapSpot,
   type BodyMapView,
 } from '../../shared/bodyMap'
-import { LABEL_SIZE, labelLayout } from '../../shared/bodyMapLabels'
+import { LABEL_SIZE, labelLayout, spotPlacement } from '../../shared/bodyMapLabels'
 import { MAP_VIEWBOX, OUTLINE_PATH } from '../../shared/bodyOutline'
 import type { CaseType } from '../../types/database'
 import { useInvalidateCaseTypes } from './useInvalidateCaseTypes'
@@ -92,7 +94,10 @@ export function PlaceOnMapDialog({
 }) {
   const { toast } = useToast()
   const invalidate = useInvalidateCaseTypes()
-  const existing = placementOf(caseType)
+  // A case type on a standard spot starts from where that spot is drawn, label
+  // included; saving then stores it as its own position.
+  const onStandard = bodyMapSpot(caseType.map_tag)
+  const existing = placementOf(caseType) ?? (onStandard ? spotPlacement(onStandard) : null)
 
   const [dot, setDot] = useState<Dot | null>(existing ? { view: existing.view, x: existing.x, y: existing.y } : null)
   const [label, setLabel] = useState<{ x: number; y: number } | null>(
@@ -103,9 +108,22 @@ export function PlaceOnMapDialog({
 
   // Everything else already on the map, so the admin can see what is nearby.
   const others = all
-    .filter((ct) => ct.id !== caseType.id)
+    .filter((ct) => ct.id !== caseType.id && !ct.is_archived)
     .map((ct) => resolveSpot(ct))
     .filter((spot): spot is BodyMapSpot => spot !== null)
+
+  // Standard spots nobody else is using, to start from instead of clicking.
+  const taken = new Set(all.filter((ct) => ct.id !== caseType.id && !ct.is_archived).map((ct) => ct.map_tag))
+  const standardSpots = BODY_MAP_SPOTS.filter((spot) => !taken.has(spot.tag))
+
+  function startFrom(tag: string) {
+    const spot = bodyMapSpot(tag)
+    if (!spot) return
+    const start = spotPlacement(spot)
+    setDot({ view: start.view, x: start.x, y: start.y })
+    setLabel(start.labelX !== null && start.labelY !== null ? { x: start.labelX, y: start.labelY } : null)
+    setMode('label')
+  }
 
   const current: BodyMapSpot | null = dot
     ? {
@@ -197,6 +215,23 @@ export function PlaceOnMapDialog({
             ? 'Click the figure where patients should tap for this case type.'
             : 'Now click where its name should be written, or save to put it beside the dot.'}
         </p>
+
+        <label className="mb-3 flex items-center gap-2 text-sm text-slate-600">
+          Start from a standard spot
+          <select
+            aria-label="Start from a standard spot"
+            value=""
+            onChange={(e) => startFrom(e.target.value)}
+            className="min-w-0 rounded-lg border border-slate-300 px-2 py-1 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">Choose…</option>
+            {standardSpots.map((spot) => (
+              <option key={spot.tag} value={spot.tag}>
+                {spot.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button
