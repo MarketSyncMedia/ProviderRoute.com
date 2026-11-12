@@ -792,26 +792,35 @@ describe('tenant isolation (staging Supabase RLS)', () => {
   })
 
   describe('10e. self-scheduling links and the widget buttons\' wording', () => {
-    it('stores an https self-scheduling link at a location, and clears it', async () => {
-      const { tenantA } = harness
-      const row = tenantA.records.providerLocation
-      const set = async (value: string | null) =>
-        tenantA.client.from('provider_locations').update({ self_schedule_link: value }).eq('id', row).select('self_schedule_link').single()
+    // Tenant A's fixtures have no provider_locations row, so these write their own
+    // (the harness removes provider_locations before providers on cleanup).
+    const setSelfScheduleLink = (value: string | null) =>
+      harness.tenantA.client
+        .from('provider_locations')
+        .upsert(
+          {
+            provider_id: harness.tenantA.records.provider,
+            location_id: harness.tenantA.records.location,
+            self_schedule_link: value,
+          },
+          { onConflict: 'provider_id,location_id' },
+        )
+        .select('self_schedule_link')
+        .single()
 
-      const stored = await set('https://cal.example/dr-smith')
+    it('stores an https self-scheduling link at a location, and clears it', async () => {
+      const stored = await setSelfScheduleLink('https://cal.example/dr-smith')
       expect(stored.error).toBeNull()
       expect(stored.data?.self_schedule_link).toBe('https://cal.example/dr-smith')
 
-      const cleared = await set(null)
+      const cleared = await setSelfScheduleLink(null)
       expect(cleared.error).toBeNull()
       expect(cleared.data?.self_schedule_link).toBeNull()
     })
 
     it('keeps a self-scheduling link to https, the way every other patient-facing link is', async () => {
-      const { tenantA } = harness
-      const row = tenantA.records.providerLocation
       for (const bad of ['http://cal.example/dr', 'javascript:alert(1)', 'https://cal.example/a b', 'cal.example/dr']) {
-        const { error } = await tenantA.client.from('provider_locations').update({ self_schedule_link: bad }).eq('id', row)
+        const { error } = await setSelfScheduleLink(bad)
         expect(error, bad).not.toBeNull()
       }
     })
