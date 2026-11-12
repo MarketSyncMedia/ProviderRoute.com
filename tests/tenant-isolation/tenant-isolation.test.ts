@@ -590,6 +590,390 @@ describe('tenant isolation (staging Supabase RLS)', () => {
     })
   })
 
+  describe('10b. imports and archived offerings', () => {
+    it('brings back an archived offering instead of failing on the unique constraint', async () => {
+      const { tenantA, runId } = harness
+      const name = `Revive Provider ${runId}`
+      const caseName = `Revive Case ${runId}`
+      const key = name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+
+      const { data: provider, error: providerError } = await tenantA.client
+        .from('providers')
+        .insert({ org_id: tenantA.orgId, name, normalized_name: key, category_ids: [] })
+        .select('id')
+        .single()
+      expect(providerError).toBeNull()
+      const { data: caseType, error: caseTypeError } = await tenantA.client
+        .from('case_types')
+        .insert({ org_id: tenantA.orgId, name: caseName })
+        .select('id')
+        .single()
+      expect(caseTypeError).toBeNull()
+      const { error: offeringError } = await tenantA.client.from('offerings').insert({
+        org_id: tenantA.orgId,
+        provider_id: provider!.id,
+        case_type_id: caseType!.id,
+        location_ids: [],
+        constraints: { age_min: 1 },
+        is_archived: true,
+      })
+      expect(offeringError).toBeNull()
+
+      const { data, error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(name, caseName, {
+          conflicts: [{ rowIndex: 0, existingProviderId: provider!.id }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect(data).toMatchObject({ providersUpdated: 1, offeringsUpserted: 1 })
+
+      const { data: offerings } = await tenantA.client
+        .from('offerings')
+        .select('is_archived')
+        .eq('provider_id', provider!.id)
+        .eq('case_type_id', caseType!.id)
+      expect(offerings).toEqual([{ is_archived: false }])
+    })
+  })
+
+  describe('10c. imports and archived providers', () => {
+    it('merges into an archived provider and brings them back', async () => {
+      const { tenantA, runId } = harness
+      const name = `Restore Import Provider ${runId}`
+      const caseName = `Restore Import Case ${runId}`
+      const key = name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+
+      const { data: provider, error: providerError } = await tenantA.client
+        .from('providers')
+        .insert({ org_id: tenantA.orgId, name, normalized_name: key, category_ids: [], is_archived: true })
+        .select('id')
+        .single()
+      expect(providerError).toBeNull()
+
+      const { data, error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(name, caseName, {
+          conflicts: [{ rowIndex: 0, existingProviderId: provider!.id }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect(data).toMatchObject({ providersCreated: 0, providersUpdated: 1, offeringsUpserted: 1 })
+
+      const { data: restored } = await tenantA.client
+        .from('providers')
+        .select('is_archived')
+        .eq('id', provider!.id)
+        .single()
+      expect(restored?.is_archived).toBe(false)
+      const { count } = await tenantA.client
+        .from('providers')
+        .select('id', { count: 'exact', head: true })
+        .eq('normalized_name', key)
+      expect(count).toBe(1)
+    })
+
+    it('leaves an archived provider archived when the row is kept separate', async () => {
+      const { tenantA, runId } = harness
+      const name = `Separate Import Provider ${runId}`
+      const key = name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+      const { data: provider } = await tenantA.client
+        .from('providers')
+        .insert({ org_id: tenantA.orgId, name, normalized_name: key, category_ids: [], is_archived: true })
+        .select('id')
+        .single()
+
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(name, `Separate Import Case ${runId}`, {
+          conflicts: [{ rowIndex: 0, existingProviderId: provider!.id }],
+          resolvedConflicts: { 0: 'separate' },
+        }),
+      })
+      expect(error).toBeNull()
+
+      const { data: original } = await tenantA.client.from('providers').select('is_archived').eq('id', provider!.id).single()
+      expect(original?.is_archived).toBe(true)
+    })
+
+    it('still rejects a conflict provider from another tenant, archived or not', async () => {
+      const { tenantA, tenantB, runId } = harness
+      const { data: foreign } = await harness.service
+        .from('providers')
+        .insert({ org_id: tenantB.orgId, name: `Foreign Archived ${runId}`, normalized_name: `foreign archived ${runId}`, category_ids: [], is_archived: true })
+        .select('id')
+        .single()
+
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: importPayload(`Foreign Archived ${runId}`, `Foreign Case ${runId}`, {
+          conflicts: [{ rowIndex: 0, existingProviderId: foreign!.id }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).not.toBeNull()
+    })
+  })
+
+  describe('10d. case types placed on the body map by an admin', () => {
+    const position = { map_view: 'front', map_x: 45, map_y: 27.5 }
+
+    async function newCaseType(label: string, extra: Record<string, unknown> = {}) {
+      const { tenantA, runId } = harness
+      return tenantA.client
+        .from('case_types')
+        .insert({ org_id: tenantA.orgId, name: `Placed ${label} ${runId}`, ...extra })
+        .select('id, map_tag, map_view, map_x, map_y, map_label_x, map_label_y')
+        .single()
+    }
+
+    it('stores a position with or without a label, and reads it back as numbers', async () => {
+      const plain = await newCaseType('plain', position)
+      expect(plain.error).toBeNull()
+      expect(plain.data).toMatchObject({ map_view: 'front', map_x: 45, map_y: 27.5, map_label_x: null, map_label_y: null })
+
+      const labelled = await newCaseType('labelled', { ...position, map_view: 'back', map_label_x: -12.5, map_label_y: 130 })
+      expect(labelled.error).toBeNull()
+      expect(labelled.data).toMatchObject({ map_view: 'back', map_label_x: -12.5, map_label_y: 130 })
+    })
+
+    it('leaves case types with no position as they were', async () => {
+      const { data, error } = await newCaseType('none')
+      expect(error).toBeNull()
+      expect(data).toMatchObject({ map_view: null, map_x: null, map_y: null, map_label_x: null, map_label_y: null })
+    })
+
+    it('never holds both a built-in spot and its own position', async () => {
+      const { error } = await newCaseType('both', { ...position, map_tag: 'knee' })
+      expect(error).not.toBeNull()
+    })
+
+    it('rejects a position that is incomplete', async () => {
+      expect((await newCaseType('no-view', { map_x: 1, map_y: 2 })).error).not.toBeNull()
+      expect((await newCaseType('no-y', { map_view: 'front', map_x: 1 })).error).not.toBeNull()
+      expect((await newCaseType('half-label', { ...position, map_label_x: 5 })).error).not.toBeNull()
+      expect((await newCaseType('label-only', { map_label_x: 5, map_label_y: 5 })).error).not.toBeNull()
+    })
+
+    it('rejects a dot off the figure, a label off the drawing, and an unknown view', async () => {
+      expect((await newCaseType('x-high', { ...position, map_x: 100.5 })).error).not.toBeNull()
+      expect((await newCaseType('y-low', { ...position, map_y: -1 })).error).not.toBeNull()
+      expect((await newCaseType('label-far', { ...position, map_label_x: 141, map_label_y: 0 })).error).not.toBeNull()
+      expect((await newCaseType('side', { ...position, map_view: 'side' })).error).not.toBeNull()
+    })
+
+    it('lets two case types sit at the same place, since a position is not a shared slot', async () => {
+      expect((await newCaseType('twin-a', position)).error).toBeNull()
+      expect((await newCaseType('twin-b', position)).error).toBeNull()
+    })
+
+    it('can move a case type from a built-in spot to its own position, and back', async () => {
+      const { tenantA } = harness
+      const made = await newCaseType('swap')
+      const id = made.data!.id
+      const own = await tenantA.client
+        .from('case_types')
+        .update({ map_tag: null, ...position })
+        .eq('id', id)
+        .select('map_tag, map_view')
+        .single()
+      expect(own.error).toBeNull()
+      expect(own.data).toMatchObject({ map_tag: null, map_view: 'front' })
+
+      const builtIn = await tenantA.client
+        .from('case_types')
+        .update({ map_tag: 'pelvis', map_view: null, map_x: null, map_y: null, map_label_x: null, map_label_y: null })
+        .eq('id', id)
+        .select('map_tag, map_view')
+        .single()
+      expect(builtIn.error).toBeNull()
+      expect(builtIn.data).toMatchObject({ map_tag: 'pelvis', map_view: null })
+      // Leave the shared spot free for the other sections.
+      await tenantA.client.from('case_types').update({ map_tag: null }).eq('id', id)
+    })
+  })
+
+  describe('10e. self-scheduling links and the widget buttons\' wording', () => {
+    // Tenant A's fixtures have no provider_locations row, so these write their own
+    // (the harness removes provider_locations before providers on cleanup).
+    const setSelfScheduleLink = (value: string | null) =>
+      harness.tenantA.client
+        .from('provider_locations')
+        .upsert(
+          {
+            provider_id: harness.tenantA.records.provider,
+            location_id: harness.tenantA.records.location,
+            self_schedule_link: value,
+          },
+          { onConflict: 'provider_id,location_id' },
+        )
+        .select('self_schedule_link')
+        .single()
+
+    it('stores an https self-scheduling link at a location, and clears it', async () => {
+      const stored = await setSelfScheduleLink('https://cal.example/dr-smith')
+      expect(stored.error).toBeNull()
+      expect(stored.data?.self_schedule_link).toBe('https://cal.example/dr-smith')
+
+      const cleared = await setSelfScheduleLink(null)
+      expect(cleared.error).toBeNull()
+      expect(cleared.data?.self_schedule_link).toBeNull()
+    })
+
+    it('keeps a self-scheduling link to https, the way every other patient-facing link is', async () => {
+      for (const bad of ['http://cal.example/dr', 'javascript:alert(1)', 'https://cal.example/a b', 'cal.example/dr']) {
+        const { error } = await setSelfScheduleLink(bad)
+        expect(error, bad).not.toBeNull()
+      }
+    })
+
+    it('takes only simple, advanced or the default as a provider\'s self-scheduling mode', async () => {
+      const { tenantA } = harness
+      const mode = (value: string) =>
+        tenantA.client.from('providers').update({ self_schedule_mode: value }).eq('id', tenantA.records.provider)
+
+      expect((await mode('advanced')).error).toBeNull()
+      expect((await mode('simple')).error).toBeNull()
+      expect((await mode('default')).error).toBeNull()
+      expect((await mode('sometimes')).error).not.toBeNull()
+    })
+
+    it('takes only simple or advanced as the organization\'s default self-scheduling mode', async () => {
+      const { tenantA } = harness
+      const mode = (value: string) =>
+        tenantA.client.from('organizations').update({ default_self_schedule_mode: value }).eq('id', tenantA.orgId)
+
+      expect((await mode('advanced')).error).toBeNull()
+      expect((await mode('simple')).error).toBeNull()
+      // "default" only makes sense for a provider, who falls back to this.
+      expect((await mode('default')).error).not.toBeNull()
+    })
+
+    it('limits the button wording to 40 characters, and lets it be blank', async () => {
+      const { tenantA } = harness
+      const widget = tenantA.records.widget
+      const update = (patch: Record<string, string | null>) =>
+        tenantA.client.from('widgets').update(patch).eq('id', widget)
+
+      expect((await update({ booking_button_text: 'Request an appointment', self_schedule_button_text: 'Schedule online' })).error).toBeNull()
+      expect((await update({ booking_button_text: 'x'.repeat(40) })).error).toBeNull()
+      expect((await update({ booking_button_text: 'x'.repeat(41) })).error).not.toBeNull()
+      expect((await update({ self_schedule_button_text: 'x'.repeat(41) })).error).not.toBeNull()
+      expect((await update({ booking_button_text: null, self_schedule_button_text: null })).error).toBeNull()
+    })
+  })
+
+  describe('10f. imported self-scheduling links', () => {
+    const keyOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+
+    /** An import of one provider at tenant A's location, with a self-scheduling column when `self` is given. */
+    function linkImport(name: string, caseType: string, links: { self?: string | null; request?: string | null }, extra: Record<string, unknown> = {}) {
+      const mappings: Record<string, unknown>[] = [
+        { excelHeader: 'Provider', role: 'provider_name' },
+        { excelHeader: 'Case Type', role: 'case_type' },
+        { excelHeader: 'Towson', role: 'location', locationId: harness.tenantA.records.location },
+      ]
+      const row: Record<string, string> = { Provider: name, 'Case Type': caseType, Towson: 'yes' }
+      if (links.request !== undefined) {
+        mappings.push({ excelHeader: 'Request', role: 'booking_link', locationScope: 'all' })
+        row.Request = links.request ?? ''
+      }
+      if (links.self !== undefined) {
+        mappings.push({ excelHeader: 'Self', role: 'self_schedule_link', locationScope: 'all' })
+        row.Self = links.self ?? ''
+      }
+      return importPayload(name, caseType, {
+        headers: Object.keys(row),
+        mappings,
+        rows: [row],
+        ...extra,
+      })
+    }
+
+    async function providerIdOf(name: string) {
+      const { data, error } = await harness.tenantA.client.from('providers').select('id').eq('normalized_name', keyOf(name)).single()
+      expect(error).toBeNull()
+      return data!.id as string
+    }
+
+    async function linksOf(providerId: string) {
+      const { data, error } = await harness.tenantA.client
+        .from('provider_locations')
+        .select('booking_link,self_schedule_link')
+        .eq('provider_id', providerId)
+        .single()
+      expect(error).toBeNull()
+      return data
+    }
+
+    it('saves a self-scheduling link at the location the row is at', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Provider ${runId}`
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Link Case ${runId}`, { request: 'https://book.example/dr', self: 'https://cal.example/dr' }),
+      })
+      expect(error).toBeNull()
+      expect(await linksOf(await providerIdOf(name))).toEqual({
+        booking_link: 'https://book.example/dr',
+        self_schedule_link: 'https://cal.example/dr',
+      })
+    })
+
+    it('leaves a self-scheduling link alone when a later import has no such column', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Keep ${runId}`
+      await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Keep Case ${runId}`, { request: 'https://book.example/one', self: 'https://cal.example/keep' }),
+      })
+      const providerId = await providerIdOf(name)
+
+      // The same provider again, as an import that predates the column would send it.
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Keep Case ${runId}`, { request: 'https://book.example/two' }, {
+          conflicts: [{ rowIndex: 0, existingProviderId: providerId }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect(await linksOf(providerId)).toEqual({
+        booking_link: 'https://book.example/two',
+        self_schedule_link: 'https://cal.example/keep',
+      })
+    })
+
+    it('clears it when the file maps the column and the cell is blank', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Clear ${runId}`
+      await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Clear Case ${runId}`, { self: 'https://cal.example/clear' }),
+      })
+      const providerId = await providerIdOf(name)
+
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Clear Case ${runId}`, { self: '' }, {
+          conflicts: [{ rowIndex: 0, existingProviderId: providerId }],
+          resolvedConflicts: { 0: 'merge' },
+        }),
+      })
+      expect(error).toBeNull()
+      expect((await linksOf(providerId))?.self_schedule_link).toBeNull()
+    })
+
+    it('rejects a self-scheduling link that is not https, and imports nothing', async () => {
+      const { tenantA, runId } = harness
+      const name = `Self Link Http ${runId}`
+      const { error } = await tenantA.client.rpc('execute_provider_import', {
+        p_payload: linkImport(name, `Self Http Case ${runId}`, { self: 'http://cal.example/dr' }),
+      })
+      expect(error).not.toBeNull()
+      expect(error?.message).toContain('Self-scheduling links must use HTTPS')
+
+      const { count } = await tenantA.client
+        .from('providers')
+        .select('id', { count: 'exact', head: true })
+        .eq('normalized_name', keyOf(name))
+      expect(count).toBe(0)
+    })
+  })
+
   describe('11. live widget publication requirements', () => {
     const PRIVACY_URL = 'https://example.invalid/privacy'
     const DISCLAIMER = 'Informational only, not medical advice.'

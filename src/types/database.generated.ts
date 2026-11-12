@@ -88,7 +88,12 @@ export type Database = {
           created_at: string | null
           id: string
           is_archived: boolean | null
+          map_label_x: number | null
+          map_label_y: number | null
           map_tag: string | null
+          map_view: string | null
+          map_x: number | null
+          map_y: number | null
           name: string
           org_id: string
           sort_order: number
@@ -98,7 +103,12 @@ export type Database = {
           created_at?: string | null
           id?: string
           is_archived?: boolean | null
+          map_label_x?: number | null
+          map_label_y?: number | null
           map_tag?: string | null
+          map_view?: string | null
+          map_x?: number | null
+          map_y?: number | null
           name: string
           org_id: string
           sort_order?: number
@@ -108,7 +118,12 @@ export type Database = {
           created_at?: string | null
           id?: string
           is_archived?: boolean | null
+          map_label_x?: number | null
+          map_label_y?: number | null
           map_tag?: string | null
+          map_view?: string | null
+          map_x?: number | null
+          map_y?: number | null
           name?: string
           org_id?: string
           sort_order?: number
@@ -436,6 +451,7 @@ export type Database = {
           created_at: string | null
           default_booking_mode: string | null
           default_phone_mode: string | null
+          default_self_schedule_mode: string | null
           fallback_message: string | null
           fallback_phone: string | null
           id: string
@@ -448,6 +464,7 @@ export type Database = {
           created_at?: string | null
           default_booking_mode?: string | null
           default_phone_mode?: string | null
+          default_self_schedule_mode?: string | null
           fallback_message?: string | null
           fallback_phone?: string | null
           id?: string
@@ -460,6 +477,7 @@ export type Database = {
           created_at?: string | null
           default_booking_mode?: string | null
           default_phone_mode?: string | null
+          default_self_schedule_mode?: string | null
           fallback_message?: string | null
           fallback_phone?: string | null
           id?: string
@@ -478,6 +496,7 @@ export type Database = {
           location_id: string
           phone: string | null
           provider_id: string
+          self_schedule_link: string | null
           updated_at: string | null
         }
         Insert: {
@@ -488,6 +507,7 @@ export type Database = {
           location_id: string
           phone?: string | null
           provider_id: string
+          self_schedule_link?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -498,6 +518,7 @@ export type Database = {
           location_id?: string
           phone?: string | null
           provider_id?: string
+          self_schedule_link?: string | null
           updated_at?: string | null
         }
         Relationships: [
@@ -532,6 +553,7 @@ export type Database = {
           npi: string | null
           org_id: string
           phone_mode: string | null
+          self_schedule_mode: string | null
           subtitle: string | null
           updated_at: string | null
         }
@@ -549,6 +571,7 @@ export type Database = {
           npi?: string | null
           org_id: string
           phone_mode?: string | null
+          self_schedule_mode?: string | null
           subtitle?: string | null
           updated_at?: string | null
         }
@@ -566,6 +589,7 @@ export type Database = {
           npi?: string | null
           org_id?: string
           phone_mode?: string | null
+          self_schedule_mode?: string | null
           subtitle?: string | null
           updated_at?: string | null
         }
@@ -790,6 +814,7 @@ export type Database = {
       }
       widgets: {
         Row: {
+          booking_button_text: string | null
           button_animation: string
           button_icon_type: string
           button_icon_value: string | null
@@ -814,11 +839,13 @@ export type Database = {
           scoped_location_ids: string[]
           scoped_provider_ids: string[]
           scoped_question_ids: string[]
+          self_schedule_button_text: string | null
           show_worth_the_drive: boolean | null
           status: string | null
           updated_at: string | null
         }
         Insert: {
+          booking_button_text?: string | null
           button_animation?: string
           button_icon_type?: string
           button_icon_value?: string | null
@@ -843,11 +870,13 @@ export type Database = {
           scoped_location_ids?: string[]
           scoped_provider_ids?: string[]
           scoped_question_ids?: string[]
+          self_schedule_button_text?: string | null
           show_worth_the_drive?: boolean | null
           status?: string | null
           updated_at?: string | null
         }
         Update: {
+          booking_button_text?: string | null
           button_animation?: string
           button_icon_type?: string
           button_icon_value?: string | null
@@ -872,6 +901,7 @@ export type Database = {
           scoped_location_ids?: string[]
           scoped_provider_ids?: string[]
           scoped_question_ids?: string[]
+          self_schedule_button_text?: string | null
           show_worth_the_drive?: boolean | null
           status?: string | null
           updated_at?: string | null
@@ -897,6 +927,7 @@ export type Database = {
       }
       execute_provider_import: { Args: { p_payload: Json }; Returns: Json }
       normalize_name: { Args: { input: string }; Returns: string }
+      prune_job_health: { Args: never; Returns: Json }
       set_organization_member_role: {
         Args: { p_role: string; p_user_id: string }
         Returns: undefined

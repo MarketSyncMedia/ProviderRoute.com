@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { supabase } from '../../lib/supabase'
-import { normalizeApprovedDomain } from '../../lib/approvedDomain'
+import { approvedDomainListProblem, normalizeApprovedDomain } from '../../lib/approvedDomain'
 import { useAuthStore } from '../../stores/authStore'
 import { useToast } from '../../components/ui/toastStore'
 import type { Organization, OrganizationInvitation, User } from '../../types/database'
@@ -14,6 +14,7 @@ type OrgFormValues = {
   allowed_domains_text: string
   default_booking_mode: 'simple' | 'advanced'
   default_phone_mode: 'simple' | 'advanced'
+  default_self_schedule_mode: 'simple' | 'advanced'
 }
 
 export default function SettingsPage() {
@@ -43,6 +44,7 @@ export default function SettingsPage() {
   const {
     register,
     handleSubmit,
+    control,
     reset,
     formState: { isDirty, errors },
   } = useForm<OrgFormValues>({
@@ -65,10 +67,12 @@ export default function SettingsPage() {
       allowed_domains_text: (org.allowed_domains ?? []).join('\n'),
       default_booking_mode: asOrgMode(org.default_booking_mode),
       default_phone_mode: asOrgMode(org.default_phone_mode),
+      default_self_schedule_mode: asOrgMode(org.default_self_schedule_mode),
     })
   }, [org, reset])
 
   const isOwner = user?.role === 'owner'
+  const domainProblem = approvedDomainListProblem(useWatch({ control, name: 'allowed_domains_text' }) ?? '')
 
   const loadTeam = useCallback(async () => {
     if (!org || !user) return
@@ -147,16 +151,13 @@ export default function SettingsPage() {
     if (!org) {
       return
     }
-    const domainEntries = values.allowed_domains_text
+    // The field's validate rule has already rejected any invalid entry, naming
+    // it on the form, so every entry here normalizes.
+    const normalizedDomains = values.allowed_domains_text
       .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-    const normalizedDomains = domainEntries.map(normalizeApprovedDomain)
-    if (normalizedDomains.some((domain) => !domain) || normalizedDomains.length > 50) {
-      toast.error('Use 1-50 valid full domains such as example.com; wildcards and bare suffixes are not allowed')
-      return
-    }
-    const allowed_domains = Array.from(new Set(normalizedDomains as string[]))
+      .map((line) => normalizeApprovedDomain(line.trim()))
+      .filter((domain): domain is string => Boolean(domain))
+    const allowed_domains = Array.from(new Set(normalizedDomains))
     setOrgSaving(true)
 
     const { data, error } = await supabase
@@ -168,6 +169,7 @@ export default function SettingsPage() {
         allowed_domains,
         default_booking_mode: values.default_booking_mode,
         default_phone_mode: values.default_phone_mode,
+        default_self_schedule_mode: values.default_self_schedule_mode,
       })
       .eq('id', org.id)
       .select()
@@ -190,6 +192,7 @@ export default function SettingsPage() {
       allowed_domains_text: (updated.allowed_domains ?? []).join('\n'),
       default_booking_mode: asOrgMode(updated.default_booking_mode),
       default_phone_mode: asOrgMode(updated.default_phone_mode),
+      default_self_schedule_mode: asOrgMode(updated.default_self_schedule_mode),
     })
   })
 
@@ -334,20 +337,31 @@ export default function SettingsPage() {
               id="org-domains"
               rows={3}
               placeholder={'yourwebsite.com\napp.yourwebsite.com'}
-              {...register('allowed_domains_text')}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              aria-invalid={domainProblem ? true : undefined}
+              aria-describedby={domainProblem ? 'org-domains-problem' : undefined}
+              {...register('allowed_domains_text', {
+                validate: (text) => approvedDomainListProblem(text) ?? true,
+              })}
+              className={[
+                'w-full rounded-lg border px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                domainProblem ? 'border-red-400' : 'border-slate-300',
+              ].join(' ')}
             />
+            {/* Shown as soon as the list is loaded or edited, not only after a
+                save attempt: a stored entry the rule rejects otherwise blocks
+                every save on this form without saying why. */}
+            {domainProblem ? (
+              <p id="org-domains-problem" role="alert" className="mt-1 text-sm text-red-600">
+                {domainProblem}
+              </p>
+            ) : null}
             <p className="mt-1 text-xs text-slate-500">
               One full domain per line. Live widgets fail closed when this list is empty or invalid.
             </p>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Default Booking Mode</label>
-            <ul className="mb-2 space-y-1 text-xs text-slate-500">
-              <li><span className="font-medium text-slate-600">Simple</span> — Provider uses the same booking link at every location</li>
-              <li><span className="font-medium text-slate-600">Advanced</span> — Provider has different booking links per location</li>
-            </ul>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Default Appointment Request Mode</label>
             <select
               {...register('default_booking_mode')}
               className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -357,11 +371,17 @@ export default function SettingsPage() {
             </select>
           </div>
           <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Default Self-Scheduling Mode</label>
+            <select
+              {...register('default_self_schedule_mode')}
+              className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="simple">Simple — Same link for all locations</option>
+              <option value="advanced">Advanced — Different link per location</option>
+            </select>
+          </div>
+          <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Default Phone Mode</label>
-            <ul className="mb-2 space-y-1 text-xs text-slate-500">
-              <li><span className="font-medium text-slate-600">Simple</span> — Provider uses the same phone number at every location</li>
-              <li><span className="font-medium text-slate-600">Advanced</span> — Provider has different phone numbers per location</li>
-            </ul>
             <select
               {...register('default_phone_mode')}
               className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"

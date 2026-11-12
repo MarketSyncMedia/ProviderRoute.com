@@ -1,4 +1,5 @@
 import { supabase } from '../supabase'
+import { offeringSaveError } from './offerings'
 import { selectAllRows } from './paginate'
 import type { Offering, Provider } from '../../types/database'
 
@@ -18,12 +19,38 @@ export async function getDataTableOfferings(orgId: string): Promise<DataTableOff
   // Paged: this backs the whole data table, so truncating at PostgREST's row
   // cap would hide offerings from the admin entirely rather than merely
   // shortening a list.
+  // Archiving a provider or a case type leaves its offerings as they are, so
+  // restoring it brings them back; the inner joins are what hide them meanwhile.
   const rows = await selectAllRows<DataTableOffering>((from, to) =>
     supabase
       .from('offerings')
-      .select('*, providers(id, name, category_ids, image_url)')
+      .select('*, providers!inner(id, name, category_ids, image_url), case_types!inner()')
       .eq('org_id', orgId)
       .eq('is_archived', false)
+      .eq('providers.is_archived', false)
+      .eq('case_types.is_archived', false)
+      .range(from, to),
+  )
+
+  return rows ?? []
+}
+
+/**
+ * Archived counterpart of getDataTableOfferings, backing the data table's
+ * "Archived" view. Paged for the same reason: an import that replaces data can
+ * archive thousands of rows at once. Offerings of an archived provider or case
+ * type are left out: restoring one here would not bring it back while its
+ * parent stays archived.
+ */
+export async function getArchivedDataTableOfferings(orgId: string): Promise<DataTableOffering[]> {
+  const rows = await selectAllRows<DataTableOffering>((from, to) =>
+    supabase
+      .from('offerings')
+      .select('*, providers!inner(id, name, category_ids, image_url), case_types!inner()')
+      .eq('org_id', orgId)
+      .eq('is_archived', true)
+      .eq('providers.is_archived', false)
+      .eq('case_types.is_archived', false)
       .range(from, to),
   )
 
@@ -73,7 +100,7 @@ export async function updateOfferingCaseType(
     .update({ case_type_id: caseTypeId })
     .eq('id', offeringId)
 
-  return { error: error?.message ?? null }
+  return { error: error ? offeringSaveError(error) : null }
 }
 
 export async function updateProviderCategories(
@@ -92,6 +119,15 @@ export async function archiveOfferings(offeringIds: string[]): Promise<{ error: 
   const { error } = await supabase
     .from('offerings')
     .update({ is_archived: true })
+    .in('id', offeringIds)
+
+  return { error: error?.message ?? null }
+}
+
+export async function restoreOfferings(offeringIds: string[]): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('offerings')
+    .update({ is_archived: false })
     .in('id', offeringIds)
 
   return { error: error?.message ?? null }

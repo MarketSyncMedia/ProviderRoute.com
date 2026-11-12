@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Search, Upload, Users } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useNavigationIntent } from '../../hooks/useNavigationIntent'
 import ImportWizard from '../../components/import/ImportWizard'
 import EmptyState from '../../components/ui/EmptyState'
 import { useToast } from '../../components/ui/toastStore'
+import { getCategories } from '../../lib/api/categories'
+import ArchivedProviders from './ArchivedProviders'
 import { getProviders, createProvider } from '../../lib/api/providers'
-import { supabase } from '../../lib/supabase'
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../shared/avatarPalette'
 import { readableTextColor } from '../../shared/colorContrast'
 import { useAuthStore } from '../../stores/authStore'
-import type { Category } from '../../types/database'
 
 interface AddProviderForm {
   name: string
@@ -26,7 +27,8 @@ export default function ProvidersPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
-  const [modal, setModal] = useState<{ type: 'add' | null }>({ type: null })
+  const openAddOnArrival = useNavigationIntent('add-provider')
+  const [modal, setModal] = useState<{ type: 'add' | null }>(() => ({ type: openAddOnArrival ? 'add' : null }))
   const [searchQuery, setSearchQuery] = useState('')
   const [addForm, setAddForm] = useState<AddProviderForm>({
     name: '',
@@ -47,15 +49,7 @@ export default function ProvidersPage() {
 
   const { data: categories = [] } = useQuery({
     queryKey: ['categories', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as Category[]
-    },
+    queryFn: () => getCategories(orgId),
     enabled: Boolean(orgId),
   })
 
@@ -160,7 +154,7 @@ export default function ProvidersPage() {
             onClick={() => setModal({ type: 'add' })}
           >
             <Plus className="h-4 w-4" />
-            + Add Provider
+            Add Provider
           </button>
         </div>
       </div>
@@ -233,6 +227,8 @@ export default function ProvidersPage() {
           })}
         </div>
       )}
+
+      <ArchivedProviders />
 
       {modal.type === 'add' ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center">

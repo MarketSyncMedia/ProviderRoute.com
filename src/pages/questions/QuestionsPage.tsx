@@ -18,6 +18,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import {
+  Archive,
   Eye,
   FlaskConical,
   GripVertical,
@@ -26,7 +27,6 @@ import {
   Pencil,
   Plus,
   Stethoscope,
-  Trash2,
   User,
   X,
 } from 'lucide-react'
@@ -34,6 +34,7 @@ import LogicTester from '../../components/testing/LogicTester'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import { useToast } from '../../components/ui/toastStore'
+import { getCaseTypes } from '../../lib/api/caseTypes'
 import { getConstraints } from '../../lib/api/constraints'
 import { getLocations } from '../../lib/api/locations'
 import {
@@ -46,8 +47,9 @@ import {
   updateQuestion,
 } from '../../lib/api/questions'
 import { useAuthStore } from '../../stores/authStore'
-import type { Constraint, Location, Question } from '../../types/database'
+import type { CaseType, Constraint, Location, Question } from '../../types/database'
 import { toJson } from '../../lib/schemaEnums'
+import ArchivedQuestions from './ArchivedQuestions'
 
 const EMPTY_QUESTIONS: Question[] = []
 
@@ -55,30 +57,38 @@ function WidgetQuestionPreview({
   question,
   constraints,
   locations,
+  caseTypes,
 }: {
   question: Question
   constraints: Constraint[]
   locations: Location[]
+  caseTypes: CaseType[]
 }) {
   const sc = (question.system_config ?? {}) as Record<string, unknown>
   const c = question.constraint_id ? constraints.find((x) => x.id === question.constraint_id) : undefined
 
+  // The entry question's answers are the org's case types.
   if (question.question_type === 'entry') {
     return (
       <div className="space-y-3">
         {question.input_type === 'buttons' && (
-          <div className="flex gap-2">
-            <button type="button" className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm">
-              Option A
-            </button>
-            <button type="button" className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm">
-              Option B
-            </button>
+          <div className="flex flex-wrap gap-2">
+            {caseTypes.map((caseType) => (
+              <span
+                key={caseType.id}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm"
+              >
+                {caseType.name}
+              </span>
+            ))}
           </div>
         )}
         {question.input_type === 'dropdown' && (
           <select className="w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm" disabled>
             <option>Select…</option>
+            {caseTypes.map((caseType) => (
+              <option key={caseType.id}>{caseType.name}</option>
+            ))}
           </select>
         )}
         {question.input_type === 'number' && (
@@ -197,14 +207,14 @@ function SortableQuestionRow({
   constraintName,
   onPreview,
   onEdit,
-  onDelete,
+  onArchive,
 }: {
   question: Question
   orderLabel: string
   constraintName: string | null
   onPreview: () => void
   onEdit: () => void
-  onDelete: () => void
+  onArchive: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: question.id,
@@ -263,10 +273,10 @@ function SortableQuestionRow({
       <button
         type="button"
         className="rounded-lg p-2 text-red-400 hover:bg-red-50 hover:text-red-600"
-        aria-label="Delete question"
-        onClick={onDelete}
+        aria-label="Archive question"
+        onClick={onArchive}
       >
-        <Trash2 className="h-4 w-4" />
+        <Archive className="h-4 w-4" />
       </button>
     </div>
   )
@@ -279,10 +289,10 @@ export default function QuestionsPage() {
 
   const [items, setItems] = useState<Question[]>([])
   const [modal, setModal] = useState<{
-    type: 'add' | 'edit' | 'delete' | 'preview' | null
+    type: 'add' | 'edit' | 'archive' | 'preview' | null
     payload?: unknown
   }>({ type: null })
-  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [archiveLoading, setArchiveLoading] = useState(false)
   const [entryEditForm, setEntryEditForm] = useState<{
     question_text: string
     input_type: Question['input_type']
@@ -317,6 +327,12 @@ export default function QuestionsPage() {
     enabled: Boolean(orgId),
   })
 
+  const { data: caseTypes = [] } = useQuery({
+    queryKey: ['case-types', orgId],
+    queryFn: () => getCaseTypes(orgId),
+    enabled: Boolean(orgId),
+  })
+
   const { data: questionsData, isLoading } = useQuery({
     queryKey: ['questions', orgId],
     queryFn: () => getQuestions(orgId),
@@ -324,6 +340,13 @@ export default function QuestionsPage() {
   })
 
   const allQuestions = questionsData ?? EMPTY_QUESTIONS
+  // The widget asks each system question at most once, so a flow that already
+  // has one must not get a second copy from a stray click.
+  const hasSystemQuestion = {
+    location: allQuestions.some((q) => q.question_type === 'location'),
+    provider: allQuestions.some((q) => q.question_type === 'provider'),
+  }
+  const systemCardsDisabled = systemBusy !== null || isLoading
 
   useEffect(() => {
     if (!orgId) {
@@ -425,8 +448,10 @@ export default function QuestionsPage() {
 
   // `items` is the drag-reorderable copy of nonEntryFromServer. Resync it
   // during render when the query returns new data, rather than from an
-  // effect, to avoid painting one stale frame after every refetch.
-  const [syncedItems, setSyncedItems] = useState(nonEntryFromServer)
+  // effect, to avoid painting one stale frame after every refetch. Starts at
+  // null, not the server list, so questions already cached on arrival are
+  // copied too; otherwise returning here within the stale time shows none.
+  const [syncedItems, setSyncedItems] = useState<Question[] | null>(null)
   if (nonEntryFromServer !== syncedItems) {
     setSyncedItems(nonEntryFromServer)
     setItems(nonEntryFromServer)
@@ -564,6 +589,10 @@ export default function QuestionsPage() {
     if (!orgId || !addType) {
       return
     }
+    if (addType !== 'clinical' && hasSystemQuestion[addType]) {
+      setAddError('This question is already in your flow.')
+      return
+    }
     setAddError('')
     setAddIsSaving(true)
 
@@ -596,10 +625,12 @@ export default function QuestionsPage() {
       question_type = 'location'
       constraint_id = null
       input_type = 'dropdown'
+      // Same keys as the edit path and the widget (widget.js reads
+      // `scope` / `location_ids`); anything else is silently ignored there.
       system_config =
         addLocationFilter === 'all'
-          ? { locationFilter: 'all' }
-          : { locationFilter: 'specific', locationIds: addLocationIds }
+          ? { scope: 'all', location_ids: [] }
+          : { scope: 'specific', location_ids: addLocationIds }
     } else {
       question_type = 'provider'
       constraint_id = null
@@ -720,7 +751,7 @@ export default function QuestionsPage() {
   }
 
   async function handleSystemLocationCard() {
-    if (!orgId) {
+    if (!orgId || hasSystemQuestion.location) {
       return
     }
     setSystemBusy('location')
@@ -747,7 +778,7 @@ export default function QuestionsPage() {
   }
 
   async function handleSystemProviderCard() {
-    if (!orgId) {
+    if (!orgId || hasSystemQuestion.provider) {
       return
     }
     setSystemBusy('provider')
@@ -798,15 +829,15 @@ export default function QuestionsPage() {
     await queryClient.invalidateQueries({ queryKey: ['questions', orgId] })
   }
 
-  async function handleConfirmDelete() {
-    if (modal.type !== 'delete' || !modal.payload || !orgId) {
+  async function handleConfirmArchive() {
+    if (modal.type !== 'archive' || !modal.payload || !orgId) {
       return
     }
     const payload = modal.payload as Question
-    setDeleteLoading(true)
+    setArchiveLoading(true)
     const { error } = await archiveQuestion(payload.id)
     if (error) {
-      setDeleteLoading(false)
+      setArchiveLoading(false)
       toast.error(error)
       return
     }
@@ -817,11 +848,11 @@ export default function QuestionsPage() {
       .sort((a, b) => a.order_rank - b.order_rank)
     const updates = nonEntry.map((q, idx) => ({ id: q.id, order_rank: idx + 1 }))
     const { error: reorderErr } = await reorderQuestions(updates)
-    setDeleteLoading(false)
+    setArchiveLoading(false)
     if (reorderErr) {
       toast.error(reorderErr)
     } else {
-      toast.success('Question removed')
+      toast.success('Question archived')
     }
     await queryClient.invalidateQueries({ queryKey: ['questions', orgId] })
     setModal({ type: null })
@@ -865,7 +896,7 @@ export default function QuestionsPage() {
             className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
           >
             <Plus className="h-4 w-4" />
-            + Add Question
+            Add Question
           </button>
         </div>
       </div>
@@ -875,26 +906,30 @@ export default function QuestionsPage() {
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            disabled={systemBusy !== null}
+            disabled={systemCardsDisabled || hasSystemQuestion.location}
             onClick={() => void handleSystemLocationCard()}
-            className="flex flex-1 min-w-[200px] cursor-pointer items-start gap-3 rounded-xl border-2 border-blue-200 bg-white p-4 text-left hover:bg-blue-50/50 disabled:opacity-50"
+            className="flex flex-1 min-w-[200px] cursor-pointer items-start gap-3 rounded-xl border-2 border-blue-200 bg-white p-4 text-left hover:bg-blue-50/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
           >
             <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
             <div>
               <div className="text-sm font-medium text-slate-900">Location Selector</div>
-              <div className="text-xs text-slate-500">Ask patients which office they prefer</div>
+              <div className="text-xs text-slate-500">
+                {hasSystemQuestion.location ? 'Already in your flow' : 'Ask patients which office they prefer'}
+              </div>
             </div>
           </button>
           <button
             type="button"
-            disabled={systemBusy !== null}
+            disabled={systemCardsDisabled || hasSystemQuestion.provider}
             onClick={() => void handleSystemProviderCard()}
-            className="flex flex-1 min-w-[200px] cursor-pointer items-start gap-3 rounded-xl border-2 border-purple-200 bg-white p-4 text-left hover:bg-purple-50/50 disabled:opacity-50"
+            className="flex flex-1 min-w-[200px] cursor-pointer items-start gap-3 rounded-xl border-2 border-purple-200 bg-white p-4 text-left hover:bg-purple-50/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
           >
             <User className="mt-0.5 h-5 w-5 shrink-0 text-purple-500" />
             <div>
               <div className="text-sm font-medium text-slate-900">Preferred Provider</div>
-              <div className="text-xs text-slate-500">Ask if they know who they want to see</div>
+              <div className="text-xs text-slate-500">
+                {hasSystemQuestion.provider ? 'Already in your flow' : 'Ask if they know who they want to see'}
+              </div>
             </div>
           </button>
         </div>
@@ -938,7 +973,7 @@ export default function QuestionsPage() {
 
           {items.length === 0 ? (
             <p className="mt-2 text-sm text-slate-500">
-              No questions added yet. Click &apos;+ Add Question&apos; or add a system component above.
+              No questions added yet. Click &apos;Add Question&apos; or add a system component above.
             </p>
           ) : (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -957,7 +992,7 @@ export default function QuestionsPage() {
                       constraintName={cName}
                       onPreview={() => setModal({ type: 'preview', payload: question })}
                       onEdit={() => setModal({ type: 'edit', payload: question })}
-                      onDelete={() => setModal({ type: 'delete', payload: question })}
+                      onArchive={() => setModal({ type: 'archive', payload: question })}
                     />
                   )
                 })}
@@ -1031,11 +1066,12 @@ export default function QuestionsPage() {
                     </button>
                     <button
                       type="button"
+                      disabled={hasSystemQuestion.location}
                       onClick={() => {
                         setAddType('location')
                         setAddError('')
                       }}
-                      className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 text-left ${
+                      className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${
                         addType === 'location'
                           ? 'border-blue-500 bg-blue-50'
                           : 'border-slate-200 hover:border-slate-300'
@@ -1044,16 +1080,19 @@ export default function QuestionsPage() {
                       <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
                       <div>
                         <div className="text-sm font-medium text-slate-900">Location Selector</div>
-                        <div className="text-xs text-slate-500">Ask which office they prefer</div>
+                        <div className="text-xs text-slate-500">
+                          {hasSystemQuestion.location ? 'Already in your flow' : 'Ask which office they prefer'}
+                        </div>
                       </div>
                     </button>
                     <button
                       type="button"
+                      disabled={hasSystemQuestion.provider}
                       onClick={() => {
                         setAddType('provider')
                         setAddError('')
                       }}
-                      className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 text-left ${
+                      className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 ${
                         addType === 'provider'
                           ? 'border-purple-500 bg-purple-50'
                           : 'border-slate-200 hover:border-slate-300'
@@ -1062,7 +1101,9 @@ export default function QuestionsPage() {
                       <User className="mt-0.5 h-5 w-5 shrink-0 text-purple-500" />
                       <div>
                         <div className="text-sm font-medium text-slate-900">Preferred Provider</div>
-                        <div className="text-xs text-slate-500">Ask if they know who they want to see</div>
+                        <div className="text-xs text-slate-500">
+                          {hasSystemQuestion.provider ? 'Already in your flow' : 'Ask if they know who they want to see'}
+                        </div>
                       </div>
                     </button>
                   </div>
@@ -1478,7 +1519,12 @@ export default function QuestionsPage() {
                 <p className="mt-1 text-xs text-slate-600">{previewPayload.subtext}</p>
               ) : null}
             </div>
-            <WidgetQuestionPreview question={previewPayload} constraints={constraints} locations={locations} />
+            <WidgetQuestionPreview
+              question={previewPayload}
+              constraints={constraints}
+              locations={locations}
+              caseTypes={caseTypes}
+            />
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
@@ -1492,14 +1538,16 @@ export default function QuestionsPage() {
         </div>
       ) : null}
 
+      <ArchivedQuestions />
+
       <ConfirmDialog
-        isOpen={modal.type === 'delete'}
-        title="Remove Question"
-        message="Remove this question from the flow?"
-        confirmLabel="Remove"
+        isOpen={modal.type === 'archive'}
+        title="Archive Question"
+        message="Archive this question? The widget will stop asking it. Restore it from Archived questions."
+        confirmLabel="Archive"
         confirmVariant="danger"
-        isLoading={deleteLoading}
-        onConfirm={handleConfirmDelete}
+        isLoading={archiveLoading}
+        onConfirm={handleConfirmArchive}
         onCancel={() => setModal({ type: null })}
       />
 

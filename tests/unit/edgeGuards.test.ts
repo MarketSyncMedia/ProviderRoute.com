@@ -4,6 +4,7 @@ import {
   boundedInt,
   boundedText,
   boundedUuidArray,
+  clientKey,
   isUuid,
   LIMITS,
   readJsonBody,
@@ -85,6 +86,29 @@ describe('public edge-function guards', () => {
       body: '[]',
     })
     expect(await readJsonBody(arrayBody)).toBeNull()
+  })
+
+  it('keys the rate limiter on the proxy-set IP, not the spoofable one', () => {
+    const headers = (h: Record<string, string>) => new Request('https://edge.test', { headers: h })
+
+    // The trusted, proxy-set header wins even when a caller forges XFF to try
+    // to land in a fresh rate-limit bucket on every request.
+    expect(
+      clientKey(headers({ 'cf-connecting-ip': '203.0.113.7', 'x-forwarded-for': '1.1.1.1' })),
+    ).toBe('203.0.113.7')
+    expect(clientKey(headers({ 'x-real-ip': '203.0.113.8', 'x-forwarded-for': '2.2.2.2' }))).toBe(
+      '203.0.113.8',
+    )
+
+    // Without a trusted header, fall back to the LAST XFF hop (appended by the
+    // proxy), not the client-controlled first one.
+    expect(clientKey(headers({ 'x-forwarded-for': '9.9.9.9, 203.0.113.9' }))).toBe('203.0.113.9')
+
+    // A forged XFF alone still collapses to one key per real edge, not a new
+    // bucket per forged value, once the proxy appends the true address.
+    expect(clientKey(headers({ 'x-forwarded-for': 'fake, 203.0.113.9' }))).toBe('203.0.113.9')
+
+    expect(clientKey(headers({}))).toBe('unknown')
   })
 
   it('binds signed session tokens to widget, session, and expiry', async () => {

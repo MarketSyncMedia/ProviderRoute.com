@@ -13,6 +13,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import ImportWizard from '../../components/import/ImportWizard'
+import OfferingModal from '../../components/modals/OfferingModal'
+import { emptyOfferingDraft, type OfferingDraft } from '../../components/modals/offeringDraft'
+import ArchivedOfferingsView from './ArchivedOfferingsView'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import LoadingSpinner from '../../components/ui/LoadingSpinner'
 import { useToast } from '../../components/ui/toastStore'
@@ -25,9 +28,15 @@ import {
   updateOfferingLocationIds,
   updateProviderCategories,
 } from '../../lib/api/dataTable'
-import { supabase } from '../../lib/supabase'
+import { getCaseTypes } from '../../lib/api/caseTypes'
+import { getCategories } from '../../lib/api/categories'
+import { getConstraints } from '../../lib/api/constraints'
+import { getLocations } from '../../lib/api/locations'
+import { createOffering } from '../../lib/api/offerings'
+import { getProviders } from '../../lib/api/providers'
+import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import { useAuthStore } from '../../stores/authStore'
-import type { CaseType, Category, Constraint, Location } from '../../types/database'
+import type { Constraint } from '../../types/database'
 
 function getProvider(offering: Record<string, unknown>) {
   const provider = offering.providers
@@ -85,6 +94,10 @@ export default function DataTablePage() {
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set())
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>(defaultVisibility)
   const [showImport, setShowImport] = useState(false)
+  const [addOfferingOpen, setAddOfferingOpen] = useState(false)
+  const [addOfferingSaving, setAddOfferingSaving] = useState(false)
+  const [addOfferingError, setAddOfferingError] = useState('')
+  const [view, setView] = useState<'active' | 'archived'>('active')
   const exactDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({})
   const columnVisibilityInitialized = useRef(false)
 
@@ -112,56 +125,59 @@ export default function DataTablePage() {
 
   const { data: locations = [], isLoading: locationsLoading } = useQuery({
     queryKey: ['locations', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('locations')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-        .order('name', { ascending: true })
-      return (data ?? []) as Location[]
-    },
+    queryFn: () => getLocations(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: constraints = [], isLoading: constraintsLoading } = useQuery({
     queryKey: ['constraints', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('constraints')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as Constraint[]
-    },
+    queryFn: () => getConstraints(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: caseTypes = [], isLoading: caseTypesLoading } = useQuery({
     queryKey: ['case-types', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('case_types')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as CaseType[]
-    },
+    queryFn: () => getCaseTypes(orgId),
     enabled: Boolean(orgId),
   })
 
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['categories', orgId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('is_archived', false)
-      return (data ?? []) as Category[]
-    },
+    queryFn: () => getCategories(orgId),
     enabled: Boolean(orgId),
   })
+
+  // Only needed by the add dialog, so it is not fetched until that opens.
+  const { data: providers = [] } = useQuery({
+    queryKey: ['providers', orgId],
+    queryFn: () => getProviders(orgId),
+    enabled: Boolean(orgId) && addOfferingOpen,
+  })
+
+  function openAddOffering() {
+    setAddOfferingError('')
+    setAddOfferingOpen(true)
+  }
+
+  async function handleAddOffering(draft: OfferingDraft) {
+    setAddOfferingSaving(true)
+    setAddOfferingError('')
+    const result = await createOffering({
+      provider_id: draft.providerId,
+      case_type_id: draft.caseTypeId,
+      org_id: orgId,
+      location_ids: draft.locationIds,
+      constraints: draft.constraints,
+    })
+    setAddOfferingSaving(false)
+    if (result.error) {
+      setAddOfferingError(result.error)
+      return
+    }
+    await invalidateOfferingReaders(queryClient, orgId)
+    setAddOfferingOpen(false)
+    toast.success(result.restored ? 'Archived offering restored with these details' : 'Offering added')
+  }
 
   // Load compact mode from localStorage once on mount
   useEffect(() => {
@@ -907,7 +923,7 @@ export default function DataTablePage() {
         return
       }
     }
-    await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Location added to selected offerings')
     setBulkAddLocationId('')
   }
@@ -925,7 +941,7 @@ export default function DataTablePage() {
         return
       }
     }
-    await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Location removed from selected offerings')
     setBulkRemoveLocationId('')
   }
@@ -948,7 +964,7 @@ export default function DataTablePage() {
         return
       }
     }
-    await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+    await invalidateOfferingReaders(queryClient, orgId)
     toast.success('Category applied to selected providers')
     setBulkCategoryId('')
   }
@@ -968,6 +984,37 @@ export default function DataTablePage() {
     <div>
       <p className="text-sm text-slate-500">Manage offerings and constraint values</p>
 
+      <div className="mt-2 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Offerings view">
+        {(['active', 'archived'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={view === tab}
+            onClick={() => setView(tab)}
+            className={[
+              '-mb-px border-b-2 px-3 py-1.5 text-sm',
+              view === tab
+                ? 'border-indigo-600 font-medium text-indigo-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700',
+            ].join(' ')}
+          >
+            {tab === 'active' ? 'Active' : 'Archived'}
+          </button>
+        ))}
+      </div>
+
+      {view === 'archived' ? (
+        <ArchivedOfferingsView
+          orgId={orgId}
+          caseTypes={caseTypes}
+          locations={locations}
+          constraints={constraints}
+        />
+      ) : null}
+
+      {/* Kept mounted (just hidden) so filters, sort and column choices survive a trip to the Archived tab. */}
+      <div hidden={view === 'archived'}>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -1017,10 +1064,10 @@ export default function DataTablePage() {
         <button
           type="button"
           className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white"
-          onClick={() => alert('Add flow coming soon')}
+          onClick={openAddOffering}
         >
           <span className="inline-flex items-center gap-1">
-            <Plus className="h-4 w-4" /> + Add
+            <Plus className="h-4 w-4" /> Add
           </span>
         </button>
         <button
@@ -1112,12 +1159,12 @@ export default function DataTablePage() {
                 toast.error(result.error)
                 return
               }
-              await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+              await invalidateOfferingReaders(queryClient, orgId)
               setSelectedRows(new Set())
               toast.success('Selected offerings archived')
             }}
           >
-            Delete Selected
+            Archive Selected
           </button>
           <button type="button" className="underline" onClick={() => setSelectedRows(new Set())}>
             Deselect All
@@ -1337,11 +1384,12 @@ export default function DataTablePage() {
           Next
         </button>
       </div>
+      </div>
 
       <ConfirmDialog
         isOpen={archiveTargetId !== null}
         title="Archive Offering"
-        message="Archive this offering?"
+        message="Archive this offering? It will be hidden from the matcher and widget, and you can restore it from the Archived tab."
         confirmLabel="Archive"
         confirmVariant="danger"
         onConfirm={async () => {
@@ -1350,7 +1398,7 @@ export default function DataTablePage() {
           if (result.error) {
             toast.error(result.error)
           } else {
-            await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+            await invalidateOfferingReaders(queryClient, orgId)
             toast.success('Offering archived')
           }
           setArchiveTargetId(null)
@@ -1371,7 +1419,7 @@ export default function DataTablePage() {
             toast.error(result.error)
             return
           }
-          await queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+          await invalidateOfferingReaders(queryClient, orgId)
           toast.success('All offerings cleared')
           setClearAllOpen(false)
           setClearAllInput('')
@@ -1395,12 +1443,27 @@ export default function DataTablePage() {
         isOpen={showImport}
         onClose={() => setShowImport(false)}
         onComplete={() => {
-          queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] })
+          void invalidateOfferingReaders(queryClient, orgId)
           setShowImport(false)
           toast.success('Import complete')
         }}
         orgId={orgId}
       />
+
+      {addOfferingOpen ? (
+        <OfferingModal
+          title="Add Offering"
+          providers={providers}
+          caseTypes={caseTypes}
+          locations={locations}
+          constraints={constraints}
+          initial={emptyOfferingDraft()}
+          saving={addOfferingSaving}
+          error={addOfferingError}
+          onCancel={() => setAddOfferingOpen(false)}
+          onSave={(draft) => void handleAddOffering(draft)}
+        />
+      ) : null}
     </div>
   )
 }

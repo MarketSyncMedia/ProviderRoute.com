@@ -41,6 +41,28 @@ export async function archiveConstraint(id: string): Promise<{ error: string | n
   return { error: error?.message ?? null }
 }
 
+export async function getArchivedConstraints(orgId: string): Promise<Constraint[]> {
+  const { data, error } = await supabase
+    .from('constraints')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('is_archived', true)
+    .order('name', { ascending: true })
+
+  if (error || !data) {
+    return []
+  }
+
+  return data as Constraint[]
+}
+
+/** An archived constraint keeps its mapped key, so nothing can have taken its place. */
+export async function restoreConstraint(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('constraints').update({ is_archived: false }).eq('id', id)
+
+  return { error: error?.message ?? null }
+}
+
 /** Next sort_order for a new constraint (non-archived only). */
 export async function getNextConstraintSortOrder(orgId: string): Promise<number> {
   const list = await getConstraints(orgId)

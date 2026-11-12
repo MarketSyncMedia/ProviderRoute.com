@@ -453,6 +453,8 @@ export default function WidgetBuilderPage() {
       button_subtext: config.button_subtext ?? widget?.button_subtext ?? null,
       button_icon_type: config.button_icon_type ?? widget?.button_icon_type ?? 'none',
       button_icon_value: config.button_icon_value ?? widget?.button_icon_value ?? null,
+      booking_button_text: config.booking_button_text ?? widget?.booking_button_text ?? null,
+      self_schedule_button_text: config.self_schedule_button_text ?? widget?.self_schedule_button_text ?? null,
     }
     const { error } = await publishWidget(id, snapshot)
     setActionLoading(false)
@@ -1129,6 +1131,43 @@ export default function WidgetBuilderPage() {
                 </div>
 
                 <div>
+                  <label htmlFor="booking-button-text" className="mb-1 block text-sm font-medium text-slate-700">
+                    Appointment Request Button Text
+                  </label>
+                  <input
+                    id="booking-button-text"
+                    type="text"
+                    maxLength={40}
+                    value={config.booking_button_text ?? widget.booking_button_text ?? ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, booking_button_text: e.target.value || null }))}
+                    className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Book Now"
+                  />
+                  <p className="mt-1 max-w-lg text-xs text-slate-500">
+                    The button on each provider&apos;s result card that opens their appointment request link. Leave
+                    blank for the default wording.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="self-schedule-button-text" className="mb-1 block text-sm font-medium text-slate-700">
+                    Self-Scheduling Button Text
+                  </label>
+                  <input
+                    id="self-schedule-button-text"
+                    type="text"
+                    maxLength={40}
+                    value={config.self_schedule_button_text ?? widget.self_schedule_button_text ?? ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, self_schedule_button_text: e.target.value || null }))}
+                    className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Schedule Online"
+                  />
+                  <p className="mt-1 max-w-lg text-xs text-slate-500">
+                    Shown only for providers who have a self-scheduling link. Leave blank for the default wording.
+                  </p>
+                </div>
+
+                <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Privacy Disclaimer (required)</label>
                   <textarea
                     rows={2}
@@ -1289,7 +1328,7 @@ export default function WidgetBuilderPage() {
           {embedMode === 'floating' ? (
             <div className="relative m-4 min-h-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="min-h-[180px] bg-slate-50 p-4">
-                <p className="text-sm text-slate-500">Configure your widget to see a preview</p>
+                <p className="text-sm text-slate-500">How the button will look on your site</p>
                 {config.open_delay_enabled ?? widget.open_delay_enabled ? (
                   <p className="mt-1 text-xs text-slate-400">
                     Hover the button below — on the live site it won&apos;t appear for{' '}
@@ -1309,10 +1348,11 @@ export default function WidgetBuilderPage() {
                   '.pmp-anim-bounce:hover{animation:pmp-bounce 0.6s ease-in-out;}',
                 ].join('\n')}</style>
               ) : null}
-              <button
-                type="button"
+              {/* A picture of the launcher, not a control: a <button> here looked clickable and did nothing. */}
+              <div
+                aria-hidden
                 className={[
-                  'absolute bottom-4 right-4 flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium shadow-lg',
+                  'absolute bottom-4 right-4 flex cursor-default items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium shadow-lg',
                   buttonAnimation !== 'none' ? `pmp-anim-${buttonAnimation}` : '',
                 ].join(' ')}
                 style={{ backgroundColor: primaryColor, color: brandTextColor }}
@@ -1331,7 +1371,7 @@ export default function WidgetBuilderPage() {
                     <span className="text-[11px] font-medium">{buttonSubtext}</span>
                   ) : null}
                 </span>
-              </button>
+              </div>
             </div>
           ) : (
             <div className="m-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -1341,11 +1381,17 @@ export default function WidgetBuilderPage() {
               >
                 {greeting}
               </div>
-              <div className="p-4 text-sm text-slate-600">Configure your widget to see a preview</div>
+              <div className="p-4 text-sm text-slate-600">How the header will look on your site</div>
             </div>
           )}
 
-          <p className="mx-4 mb-4 text-xs text-slate-500">Interactive preview available after configuring appearance</p>
+          <p className="mx-4 mb-4 text-xs text-slate-500">
+            To try the question flow with your real data, use{' '}
+            <Link to="/questions" className="font-medium text-indigo-600 hover:text-indigo-700">
+              Test Logic on the Questions page
+            </Link>
+            .
+          </p>
         </aside>
       </div>
 

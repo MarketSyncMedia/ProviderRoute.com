@@ -1,0 +1,31 @@
+name: Prune Job Health
+
+# Telemetry older than 90 days must be deleted by a database cron job that
+# nothing else watches. This fails (and GitHub emails) if that job is missing,
+# inactive, or has not succeeded in 26 hours. The job runs at 04:17 UTC, so a
+# check at 13:00 UTC always has a fresh run to look at.
+on:
+  schedule:
+    - cron: '0 13 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Same opt-in as the widget health check: skipped until it is configured.
+    if: vars.WIDGET_HEALTH_SUPABASE_URL != ''
+    env:
+      WIDGET_HEALTH_SUPABASE_URL: ${{ vars.WIDGET_HEALTH_SUPABASE_URL }}
+      WIDGET_HEALTH_ANON_KEY: ${{ secrets.WIDGET_HEALTH_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+
+      - name: Check retention job health
+        run: node scripts/prune-job-health-check.mjs

@@ -1,5 +1,8 @@
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../src/shared/avatarPalette'
 import { readableTextColor } from '../../src/shared/colorContrast'
+import { bodyMapStyles, buildBodyMap } from './bodyMap'
+import { BOOKING_WORDS, SELF_SCHEDULE_WORDS, linkButtonLabel, linkSlideHeader, planLinkAction } from './linkAction'
+import { liveProviderLocations, withSharedValues } from './providerLocations'
 
 ;(function () {
   'use strict'
@@ -126,6 +129,14 @@ import { readableTextColor } from '../../src/shared/colorContrast'
     widgetId: null,
     data: null,
     shadow: null,
+    // 'loading' until the config fetch settles, then 'ready' or 'unavailable'.
+    // Host pages should read this rather than inferring from `data`, which is
+    // also null while the fetch is still in flight.
+    loadState: 'idle',
+    // Why loadState is 'unavailable': 'domain' (host not on the allowlist),
+    // 'load' (fetch failed or widget not published) or 'config'.
+    unavailableReason: null,
+    _pendingOpen: false,
     state: {
       phase: 'questions',
       currentQuestionIndex: 0,
@@ -158,17 +169,32 @@ import { readableTextColor } from '../../src/shared/colorContrast'
       }
       if (!supabaseBaseUrl || !supabaseAnonKey || !this.state.sessionId) {
         console.warn('ProviderRoute: Secure runtime configuration is unavailable')
+        this.loadState = 'unavailable'
+        this.unavailableReason = 'config'
         return
       }
       var self = this
+      this.loadState = 'loading'
       this.fetchData().then(function () {
         if (self.data) {
           self.checkDomain()
           if (self.data) {
             self.state.activeOfferings = self.data.offerings || []
+            self.loadState = 'ready'
             self.injectWidget()
+            // A trigger was clicked before the config arrived: honor it now.
+            if (self._pendingOpen) {
+              self._pendingOpen = false
+              self.open()
+            }
+            return
           }
+          self.unavailableReason = 'domain'
+        } else {
+          self.unavailableReason = 'load'
         }
+        self._pendingOpen = false
+        self.loadState = 'unavailable'
       })
     },
 
@@ -396,6 +422,7 @@ import { readableTextColor } from '../../src/shared/colorContrast'
         '.pm-disclaimer{font-size:11px;color:#94a3b8;text-align:center;padding:8px;border-top:1px solid #f1f5f9;margin-top:8px;}',
         '.pm-field-col{display:flex;flex-direction:column;gap:8px;}',
         '@media(max-width:480px){.pm-chat{width:100vw;height:100vh;max-height:100vh;border-radius:0;position:fixed;top:0;left:0;}}',
+        bodyMapStyles(primaryColor),
       ].join('')
       this.shadow.appendChild(style)
     },
@@ -709,23 +736,36 @@ import { readableTextColor } from '../../src/shared/colorContrast'
 
     renderCaseTypes: function (q) {
       var self = this
+      var caseTypes = this.data.caseTypes || []
+      // The one path for choosing a case type, whether from the body map or
+      // the list, so both filter and track identically.
+      function select(ct) {
+        self.state.selectedCaseTypeId = ct.id
+        self.state.activeOfferings = (self.data.offerings || []).filter(function (o) {
+          return o.case_type_id === ct.id
+        })
+        self.trackEvent('case_type_selected', null, null, ct.id)
+        self.handleAnswer(q, ct.id, ct.name)
+      }
+      var body = this.shadow.getElementById('pm-body')
+      // Orgs that linked case types to body map spots get the map; everyone
+      // else gets the list exactly as before.
+      var map = buildBodyMap(document, caseTypes, select)
+      if (map) {
+        if (body) body.appendChild(map)
+        return
+      }
       var opts = document.createElement('div')
       opts.className = 'pm-options'
-      ;(this.data.caseTypes || []).forEach(function (ct) {
+      caseTypes.forEach(function (ct) {
         var btn = document.createElement('button')
         btn.className = 'pm-option'
         btn.textContent = ct.name
         btn.onclick = function () {
-          self.state.selectedCaseTypeId = ct.id
-          self.state.activeOfferings = (self.data.offerings || []).filter(function (o) {
-            return o.case_type_id === ct.id
-          })
-          self.trackEvent('case_type_selected', null, null, ct.id)
-          self.handleAnswer(q, ct.id, ct.name)
+          select(ct)
         }
         opts.appendChild(btn)
       })
-      var body = this.shadow.getElementById('pm-body')
       if (body) body.appendChild(opts)
     },
 
@@ -960,7 +1000,7 @@ import { readableTextColor } from '../../src/shared/colorContrast'
       var body = this.shadow.getElementById('pm-body')
       if (body) {
         var toRemove = body.querySelectorAll(
-          '.pm-options,.pm-number-wrap,.pm-field-col,.pm-select,.pm-next-btn,.pm-back-btn'
+          '.pm-options,.pm-bodymap,.pm-number-wrap,.pm-field-col,.pm-select,.pm-next-btn,.pm-back-btn'
         )
         toRemove.forEach(function (el) {
           el.remove()
@@ -1382,11 +1422,22 @@ import { readableTextColor } from '../../src/shared/colorContrast'
       var orgPhoneMode = config.default_phone_mode || 'simple'
       var bookingMode = provider.booking_mode === 'default' ? orgBookingMode : (provider.booking_mode || orgBookingMode)
       var phoneMode = provider.phone_mode === 'default' ? orgPhoneMode : (provider.phone_mode || orgPhoneMode)
+      var orgSelfScheduleMode = config.default_self_schedule_mode || 'simple'
+      var selfScheduleMode = provider.self_schedule_mode === 'default' ? orgSelfScheduleMode : (provider.self_schedule_mode || orgSelfScheduleMode)
 
       // Get provider locations
-      var provLocs = (this.data.providerLocations || []).filter(function (pl) {
-        return pl.provider_id === provider.id
-      })
+      // In simple mode every location offers the one shared link / number.
+      var provLocs = withSharedValues(
+        liveProviderLocations(
+          this.data.providerLocations,
+          this.data.offerings,
+          provider.id,
+          this.state.selectedCaseTypeId
+        ),
+        bookingMode,
+        phoneMode,
+        selfScheduleMode
+      )
 
       // Build card
       var card = document.createElement('div')
@@ -1499,78 +1550,74 @@ import { readableTextColor } from '../../src/shared/colorContrast'
       var defaultPanel = document.createElement('div')
       defaultPanel.style.cssText = 'display:flex;flex-direction:column;gap:6px;'
 
-      // --- BOOKING BUTTON ---
-      var bookingLocsWithLinks = provLocs.filter(function (pl) { return pl.booking_link })
+      // --- APPOINTMENT REQUEST AND SELF-SCHEDULING BUTTONS ---
+      // Two links, each per location and each following its own simple /
+      // advanced mode. A button appears only where the provider has that link,
+      // and says what the admin wrote for it in the widget's settings.
+      var linkSlides = []
+      ;[
+        { key: 'booking_link', mode: bookingMode, text: config.booking_button_text, words: BOOKING_WORDS },
+        { key: 'self_schedule_link', mode: selfScheduleMode, text: config.self_schedule_button_text, words: SELF_SCHEDULE_WORDS },
+      ].forEach(function (kind) {
+        var action = planLinkAction(provLocs, kind.key, kind.mode, self.state.selectedLocationId)
+        if (action.type === 'none') return
 
-      if (this.state.selectedLocationId) {
-        var selectedPl = provLocs.find(function (pl) { return pl.location_id === self.state.selectedLocationId })
-        var selectedLoc = (this.data.locations || []).find(function (l) { return l.id === self.state.selectedLocationId })
-        if (selectedPl && selectedPl.booking_link) {
-          var bookBtn = document.createElement('a')
-          bookBtn.className = 'pm-book'
-          bookBtn.href = selectedPl.booking_link
-          bookBtn.target = '_blank'
-          bookBtn.rel = 'noopener noreferrer'
-          bookBtn.textContent = 'Book at ' + (selectedLoc ? selectedLoc.name : 'Location')
-          bookBtn.onclick = function () {
-            self.trackClick(provider.id)
-            self.trackEvent('booking_clicked')
-          }
-          defaultPanel.appendChild(bookBtn)
-        } else if (bookingLocsWithLinks.length && (bookingLocsWithLinks.length === 1 || bookingMode === 'simple')) {
-          var firstPlFallback = bookingLocsWithLinks[0]
-          if (firstPlFallback) {
-            var firstLocFallback = (this.data.locations || []).find(function (l) { return l.id === firstPlFallback.location_id })
-            var bookBtnFallback = document.createElement('a')
-            bookBtnFallback.className = 'pm-book'
-            bookBtnFallback.href = firstPlFallback.booking_link
-            bookBtnFallback.target = '_blank'
-            bookBtnFallback.rel = 'noopener noreferrer'
-            bookBtnFallback.textContent = bookingLocsWithLinks.length === 1 ? 'Book at ' + (firstLocFallback ? firstLocFallback.name : 'Location') : 'Book Now'
-            bookBtnFallback.onclick = function () {
-              self.trackClick(provider.id)
-              self.trackEvent('booking_clicked')
-            }
-            defaultPanel.appendChild(bookBtnFallback)
-          }
-        } else if (bookingLocsWithLinks.length > 1) {
-          var bookTriggerFallback = document.createElement('button')
-          bookTriggerFallback.className = 'pm-book'
-          bookTriggerFallback.textContent = 'Book Now'
-          bookTriggerFallback.onclick = function () {
-            self.trackEvent('booking_options_opened')
-            defaultPanel.style.display = 'none'
-            bookSlide.style.display = 'flex'
-          }
-          defaultPanel.appendChild(bookTriggerFallback)
+        // Self-scheduling counts as a booking in the funnel, like the request link.
+        function trackBooking() {
+          self.trackClick(provider.id)
+          self.trackEvent('booking_clicked')
         }
-      } else if (bookingLocsWithLinks.length && (bookingLocsWithLinks.length === 1 || bookingMode === 'simple')) {
-        var firstPl = bookingLocsWithLinks[0]
-        if (firstPl) {
-          var firstLoc = (this.data.locations || []).find(function (l) { return l.id === firstPl.location_id })
-          var bookBtn2 = document.createElement('a')
-          bookBtn2.className = 'pm-book'
-          bookBtn2.href = firstPl.booking_link
-          bookBtn2.target = '_blank'
-          bookBtn2.rel = 'noopener noreferrer'
-          bookBtn2.textContent = bookingLocsWithLinks.length === 1 ? 'Book at ' + (firstLoc ? firstLoc.name : 'Location') : 'Book Now'
-          bookBtn2.onclick = function () {
-            self.trackClick(provider.id)
-            self.trackEvent('booking_clicked')
-          }
-          defaultPanel.appendChild(bookBtn2)
+
+        if (action.type === 'link') {
+          var linkLoc = (self.data.locations || []).find(function (l) { return l.id === action.locationId })
+          var linkBtn = document.createElement('a')
+          linkBtn.className = 'pm-book'
+          linkBtn.href = action.url
+          linkBtn.target = '_blank'
+          linkBtn.rel = 'noopener noreferrer'
+          linkBtn.textContent = linkButtonLabel(kind.text, kind.words, action.atLocation, linkLoc ? linkLoc.name : null)
+          linkBtn.onclick = trackBooking
+          defaultPanel.appendChild(linkBtn)
+          return
         }
-      } else if (bookingLocsWithLinks.length > 1) {
-        var bookTrigger = document.createElement('button')
-        bookTrigger.className = 'pm-book'
-        bookTrigger.textContent = 'Book Now'
-        bookTrigger.onclick = function () {
+
+        var chooseSlide = document.createElement('div')
+        chooseSlide.style.cssText = 'display:none;flex-direction:column;gap:6px;'
+        var chooseLabel = document.createElement('div')
+        chooseLabel.style.cssText = 'font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;text-align:center;'
+        chooseLabel.textContent = linkSlideHeader(kind.text, kind.words)
+        chooseSlide.appendChild(chooseLabel)
+        action.options.forEach(function (option) {
+          var optionLoc = (self.data.locations || []).find(function (l) { return l.id === option.locationId })
+          var optionBtn = document.createElement('a')
+          optionBtn.className = 'pm-book'
+          optionBtn.href = option.url
+          optionBtn.target = '_blank'
+          optionBtn.rel = 'noopener noreferrer'
+          optionBtn.textContent = optionLoc ? optionLoc.name : 'Location'
+          optionBtn.onclick = trackBooking
+          chooseSlide.appendChild(optionBtn)
+        })
+        var chooseBack = document.createElement('button')
+        chooseBack.className = 'pm-back-link'
+        chooseBack.textContent = '← back'
+        chooseBack.onclick = function () {
+          chooseSlide.style.display = 'none'
+          defaultPanel.style.display = 'flex'
+        }
+        chooseSlide.appendChild(chooseBack)
+        linkSlides.push(chooseSlide)
+
+        var chooseTrigger = document.createElement('button')
+        chooseTrigger.className = 'pm-book'
+        chooseTrigger.textContent = linkButtonLabel(kind.text, kind.words, false)
+        chooseTrigger.onclick = function () {
           self.trackEvent('booking_options_opened')
           defaultPanel.style.display = 'none'
-          bookSlide.style.display = 'flex'
+          chooseSlide.style.display = 'flex'
         }
-        defaultPanel.appendChild(bookTrigger)
-      }
+        defaultPanel.appendChild(chooseTrigger)
+      })
 
       // --- PHONE BUTTON ---
       var phoneLocsWithNumbers = provLocs.filter(function (pl) { return pl.phone })
@@ -1639,36 +1686,8 @@ import { readableTextColor } from '../../src/shared/colorContrast'
 
       actionsArea.appendChild(defaultPanel)
 
-      // --- BOOKING SLIDE ---
-      var bookSlide = document.createElement('div')
-      bookSlide.style.cssText = 'display:none;flex-direction:column;gap:6px;'
-      var bookLabel = document.createElement('div')
-      bookLabel.style.cssText = 'font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;text-align:center;'
-      bookLabel.textContent = 'Book at...'
-      bookSlide.appendChild(bookLabel)
-      bookingLocsWithLinks.forEach(function (pl) {
-        var loc = (self.data.locations || []).find(function (l) { return l.id === pl.location_id })
-        var btn = document.createElement('a')
-        btn.className = 'pm-book'
-        btn.href = pl.booking_link
-        btn.target = '_blank'
-        btn.rel = 'noopener noreferrer'
-        btn.textContent = loc ? loc.name : 'Location'
-        btn.onclick = function () {
-          self.trackClick(provider.id)
-          self.trackEvent('booking_clicked')
-        }
-        bookSlide.appendChild(btn)
-      })
-      var bookBack = document.createElement('button')
-      bookBack.className = 'pm-back-link'
-      bookBack.textContent = '← back'
-      bookBack.onclick = function () {
-        bookSlide.style.display = 'none'
-        defaultPanel.style.display = 'flex'
-      }
-      bookSlide.appendChild(bookBack)
-      actionsArea.appendChild(bookSlide)
+      // --- APPOINTMENT REQUEST / SELF-SCHEDULING SLIDES ---
+      linkSlides.forEach(function (slide) { actionsArea.appendChild(slide) })
 
       // --- CALL SLIDE ---
       var callSlide = document.createElement('div')
@@ -1699,7 +1718,7 @@ import { readableTextColor } from '../../src/shared/colorContrast'
       callSlide.appendChild(callBack)
       actionsArea.appendChild(callSlide)
 
-      if (defaultPanel.children.length > 0 || bookingLocsWithLinks.length > 1 || phoneLocsWithNumbers.length > 1) {
+      if (defaultPanel.children.length > 0 || linkSlides.length > 0 || phoneLocsWithNumbers.length > 1) {
         card.appendChild(actionsArea)
       }
 
@@ -1822,10 +1841,15 @@ import { readableTextColor } from '../../src/shared/colorContrast'
    * open_delay_enabled is on, and clicking a node that isn't there yet is a
    * silent no-op. This always opens immediately: it cancels any pending
    * delay timer so the floating button doesn't also pop up afterward, and
-   * is a safe no-op if the chat is already open or the widget hasn't
-   * finished loading yet.
+   * is a safe no-op if the chat is already open. If the widget's config is
+   * still loading, the request is remembered and applied as soon as it lands,
+   * so an early click is never lost.
    */
   widget.open = function () {
+    if (this.loadState === 'loading') {
+      this._pendingOpen = true
+      return
+    }
     if (!this.data || !this.shadow) return
     if (this._delayTimer) {
       clearTimeout(this._delayTimer)

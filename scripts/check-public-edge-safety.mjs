@@ -57,6 +57,17 @@ if (!invitations.includes("actor.role !== 'owner'") || !invitations.includes('au
 if (!invitations.includes('const actorClient') || !invitations.includes('await actorClient')) {
   failures.push('invitation database writes must run under caller RLS for attributable audit records')
 }
+// Every whole-org read on the public widget must page past PostgREST's row cap;
+// an unpaged one silently shows patients a truncated provider list. Only the
+// single-row widget and organization lookups are exempt.
+for (const segment of widgetData.split('.from(').slice(1)) {
+  const table = segment.match(/^\s*['"]([a-z_]+)['"]/)?.[1]
+  if (!table || table === 'widgets' || table === 'organizations') continue
+  // Each segment runs up to the next `.from(`, so it holds exactly one query.
+  if (!segment.includes('.range(from, to)')) {
+    failures.push(`widget-data must page its ${table} read with selectAllRows`)
+  }
+}
 if (/supabase-js@2['"]/.test(widgetData + tracking)) {
   failures.push('Edge Function dependencies must use an exact version')
 }
