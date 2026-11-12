@@ -191,8 +191,10 @@ describe('list view', () => {
   const list = () => map.querySelector('.pm-bodymap-list') as HTMLElement
   const other = () => map.querySelector('.pm-bodymap-other') as HTMLElement
 
-  it('starts on the diagram, offering to switch to the list', () => {
-    expect(toggle().textContent).toBe('Switch to list view')
+  it('starts on the diagram, with the list-view switch off', () => {
+    expect(toggle().getAttribute('role')).toBe('switch')
+    expect(toggle().textContent).toBe('List view')
+    expect(toggle().getAttribute('aria-checked')).toBe('false')
     expect(stage().hidden).toBe(false)
     expect(list().hidden).toBe(true)
   })
@@ -214,9 +216,9 @@ describe('list view', () => {
 
   it('flips back to the diagram, as often as they like', () => {
     toggle().click()
-    expect(toggle().textContent).toBe('Switch to diagram view')
+    expect(toggle().getAttribute('aria-checked')).toBe('true')
     toggle().click()
-    expect(toggle().textContent).toBe('Switch to list view')
+    expect(toggle().getAttribute('aria-checked')).toBe('false')
     expect(stage().hidden).toBe(false)
     expect(list().hidden).toBe(true)
     expect(other().hidden).toBe(false)
@@ -241,7 +243,7 @@ describe('list view', () => {
     const onViewChange = vi.fn()
     const redrawn = buildBodyMap(document, caseTypes, onSelect, { listView: true, onViewChange }) as HTMLElement
     const t = redrawn.querySelector('.pm-bodymap-toggle') as HTMLButtonElement
-    expect(t.textContent).toBe('Switch to diagram view')
+    expect(t.getAttribute('aria-checked')).toBe('true')
     expect((redrawn.querySelector('.pm-bodymap-stage') as HTMLElement).hidden).toBe(true)
 
     t.click()
