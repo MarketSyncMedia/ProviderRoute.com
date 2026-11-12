@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArchiveRestore, ChevronDown, ChevronRight } from 'lucide-react'
 import { useToast } from '../../components/ui/toastStore'
 import { getArchivedCaseTypes, restoreCaseType } from '../../lib/api/caseTypes'
+import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import { bodyMapSpot } from '../../shared/bodyMap'
 import { useAuthStore } from '../../stores/authStore'
 import type { CaseType } from '../../types/database'
@@ -13,6 +14,7 @@ export default function ArchivedCaseTypes() {
   const orgId = useAuthStore((s) => s.org?.id ?? '')
   const { toast } = useToast()
   const invalidate = useInvalidateCaseTypes()
+  const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [restoring, setRestoring] = useState<string | null>(null)
 
@@ -34,7 +36,8 @@ export default function ArchivedCaseTypes() {
       toast.error(error)
       return
     }
-    await invalidate()
+    // Its offerings come back on the data table and provider pages too.
+    await Promise.all([invalidate(), invalidateOfferingReaders(queryClient, orgId)])
     if (lostSpot) {
       toast.warning(
         `${caseType.name} restored. Its body map spot (${bodyMapSpot(caseType.map_tag)?.label}) is now used by another case type, so it was left off the map.`,

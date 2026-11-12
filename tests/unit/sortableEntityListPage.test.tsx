@@ -16,6 +16,8 @@ import type { CaseType, Category } from '../../src/types/database'
  */
 
 const catApi = vi.hoisted(() => ({
+  getCategoryProviders: vi.fn(async () => []),
+  removeCategory: vi.fn(),
   getCategories: vi.fn(),
   getCategoryOfferingCounts: vi.fn(),
   createCategory: vi.fn(),
@@ -113,7 +115,9 @@ describe('scale', () => {
     expect(screen.getAllByRole('button', { name: /edit category/i })).toHaveLength(500)
     // Guard against a regression that makes this pathological rather than slow.
     expect(ms).toBeLessThan(15_000)
-  })
+    // Its own timeout must outlast that guard: vitest's default 5s ended the test
+    // first on a busy machine, which made the 15s guard unreachable.
+  }, 30_000)
 
   it('fetches offering counts for the whole list in one call, not one per row', async () => {
     const many = Array.from({ length: 120 }, (_, i) =>
@@ -203,14 +207,14 @@ describe('error paths', () => {
     expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
 
-  it('toasts an archive error and leaves the row in place', async () => {
+  it('toasts a removal error and leaves the row in place', async () => {
     const user = userEvent.setup()
-    catApi.archiveCategory.mockResolvedValue({ error: 'FK constraint' })
+    catApi.removeCategory.mockResolvedValue({ error: 'FK constraint', providersUpdated: 0 })
     renderPage(CategoriesPage)
     await screen.findByText('Sports Medicine')
     const row = screen.getByText('Sports Medicine').closest('div') as HTMLElement
-    await user.click(within(row).getByRole('button', { name: /archive category/i }))
-    await user.click(await screen.findByRole('button', { name: /^archive$/i }))
+    await user.click(within(row).getByRole('button', { name: /remove category/i }))
+    await user.click(await screen.findByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(toastSpy.error).toHaveBeenCalledWith('FK constraint'))
     expect(screen.getByText('Sports Medicine')).toBeInTheDocument()
   })

@@ -4,12 +4,14 @@ import { getCaseTypes } from '../../lib/api/caseTypes'
 import { getCategories } from '../../lib/api/categories'
 import { createConstraint, getConstraints } from '../../lib/api/constraints'
 import { createLocation, getLocations } from '../../lib/api/locations'
-import { getProviders } from '../../lib/api/providers'
+import { getArchivedProviders, getProviders } from '../../lib/api/providers'
 import { detectConflicts, executeImportRun, type ConflictItem } from '../../lib/import/importExecution'
 import { supabase } from '../../lib/supabase'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import { useToast } from '../ui/toastStore'
 import { parseFile, type ParseResult } from '../../lib/parsers/fileParser'
+import { normalizeName } from '../../lib/parsers/nameNormalizer'
+import { applyNameFixes, nameFixKey, suggestNameFixes, suggestProviderNameFixes } from '../../lib/similarNames'
 import type { CaseType, Category, Constraint, Location, Provider } from '../../types/database'
 
 export type ColumnRole =
@@ -20,6 +22,7 @@ export type ColumnRole =
   | 'location'
   | 'constraint'
   | 'booking_link'
+  | 'self_schedule_link'
   | 'phone'
   | 'ignore'
 
@@ -64,6 +67,9 @@ const INITIAL_INLINE_CONSTRAINT = {
 // matters when a default feeds a render-time state comparison.
 const EMPTY_CONFLICTS: ConflictItem[] = []
 
+/** Columns that hold a per-location value, so they are mapped to one location or to all. */
+const LOCATION_SCOPED_ROLES: ColumnRole[] = ['booking_link', 'self_schedule_link', 'phone']
+
 const MAP_ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: '', label: '-- Select mapping --' },
   { value: 'provider_name', label: 'Provider Name' },
@@ -71,7 +77,8 @@ const MAP_ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: 'category', label: 'Category' },
   { value: 'location', label: 'Location' },
   { value: 'constraint', label: 'Constraint' },
-  { value: 'booking_link', label: 'Booking Link' },
+  { value: 'booking_link', label: 'Appointment Request Link' },
+  { value: 'self_schedule_link', label: 'Self-Scheduling Link' },
   { value: 'phone', label: 'Phone Number' },
   { value: 'ignore', label: 'Ignore this column' },
 ]
@@ -183,17 +190,20 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
 
     let cancelled = false
     void (async () => {
-      const [locs, cons, provs, cts, cats] = await Promise.all([
+      const [locs, cons, provs, archivedProvs, cts, cats] = await Promise.all([
         getLocations(orgId),
         getConstraints(orgId),
         getProviders(orgId),
+        getArchivedProviders(orgId),
         getCaseTypes(orgId),
         getCategories(orgId),
       ])
       if (!cancelled) {
         setOrgLocations(locs)
         setOrgConstraints(cons)
-        setExistingProviders(provs)
+        // Archived providers are matched too, after live ones so a live match wins a tie:
+        // an import row naming one would otherwise create a second provider for them.
+        setExistingProviders([...provs, ...archivedProvs])
         setOrgCaseTypes(cts)
         setOrgCategories(cats)
       }
@@ -255,7 +265,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
           delete next.constraintId
           delete next.rangePosition
         }
-        if (patch.role && patch.role !== 'booking_link' && patch.role !== 'phone') {
+        if (patch.role && !LOCATION_SCOPED_ROLES.includes(patch.role)) {
           delete next.locationScope
         }
         if (patch.constraintId !== undefined) {
@@ -350,6 +360,39 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     [conflicts]
   )
 
+  // Case types and categories in the file that are almost, but not exactly,
+  // ones the org already has. Without this the import adds each misspelling as
+  // a new entry beside the real one. They are matched by default; unticking
+  // one keeps the file's spelling.
+  const nameFixes = useMemo(() => {
+    if (!parseResult?.rows.length) return []
+    const providerHeader = mappings.find((m) => m.role === 'provider_name')?.excelHeader
+    return [
+      ...(providerHeader ? suggestProviderNameFixes(parseResult.rows, providerHeader) : []),
+      ...suggestNameFixes({
+        rows: parseResult.rows,
+        caseTypeHeader: mappings.find((m) => m.role === 'case_type')?.excelHeader,
+        categoryHeader: mappings.find((m) => m.role === 'category')?.excelHeader,
+        existingCaseTypes: orgCaseTypes.map((c) => c.name),
+        existingCategories: orgCategories.map((c) => c.name),
+      }),
+    ]
+  }, [parseResult, mappings, orgCaseTypes, orgCategories])
+  const [skippedNameFixes, setSkippedNameFixes] = useState<Set<string>>(() => new Set())
+  // What is previewed and imported: the file's rows with the matched names
+  // swapped in.
+  const importRows = useMemo(
+    () =>
+      applyNameFixes(
+        parseResult?.rows ?? [],
+        mappings.find((m) => m.role === 'case_type')?.excelHeader,
+        mappings.find((m) => m.role === 'category')?.excelHeader,
+        nameFixes.filter((fix) => !skippedNameFixes.has(nameFixKey(fix))),
+        mappings.find((m) => m.role === 'provider_name')?.excelHeader,
+      ),
+    [parseResult, mappings, nameFixes, skippedNameFixes],
+  )
+
   // resolvedConflicts tracks per-row resolutions for the current conflict
   // set — reset it during render when that set changes, rather than from
   // an effect reacting to a value that render-time logic already produced.
@@ -389,12 +432,16 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     let newProviders = 0
     let updatedProviders = 0
     let skippedRows = 0
+    // The import creates or updates a provider once, on the first row that names
+    // them, and later rows (their other case types) reuse that provider. Counting
+    // every row made a provider with three case types read as three providers.
+    const seenProviders = new Set<string>()
     const newCtSet = new Set<string>()
     const newCatSet = new Set<string>()
     let totalOfferings = 0
 
-    for (let i = 0; i < parseResult.rows.length; i += 1) {
-      const row = parseResult.rows[i]
+    for (let i = 0; i < importRows.length; i += 1) {
+      const row = importRows[i]
       const prov = providerHeader ? (row[providerHeader] ?? '').trim() : ''
       if (!prov) {
         skippedRows += 1
@@ -409,16 +456,18 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         continue
       }
 
+      const firstRowForProvider = !seenProviders.has(normalizeName(prov))
       if (c && res === 'merge') {
-        updatedProviders += 1
+        if (firstRowForProvider) updatedProviders += 1
       } else if (c && res === 'separate') {
-        newProviders += 1
+        if (firstRowForProvider) newProviders += 1
       } else if (!c) {
-        newProviders += 1
+        if (firstRowForProvider) newProviders += 1
       } else {
         skippedRows += 1
         continue
       }
+      seenProviders.add(normalizeName(prov))
 
       const caseVal = caseTypeHeader ? (row[caseTypeHeader] ?? '').trim() : ''
       if (!caseVal) {
@@ -429,9 +478,17 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         newCtSet.add(caseVal.trim())
       }
 
-      const catVal = categoryHeader ? (row[categoryHeader] ?? '').trim() : ''
-      if (catVal && !orgCatLower.has(catVal.toLowerCase())) {
-        newCatSet.add(catVal.trim())
+      // The import reads a category cell as a comma-separated list.
+      const catVals = categoryHeader
+        ? (row[categoryHeader] ?? '')
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean)
+        : []
+      for (const catVal of catVals) {
+        if (!orgCatLower.has(catVal.toLowerCase())) {
+          newCatSet.add(catVal.toLowerCase())
+        }
       }
 
       totalOfferings += 1
@@ -445,7 +502,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
       newCategories: newCatSet.size,
       totalOfferings,
     }
-  }, [parseResult, mappings, conflicts, resolvedConflicts, orgCaseTypes, orgCategories])
+  }, [parseResult, importRows, mappings, conflicts, resolvedConflicts, orgCaseTypes, orgCategories])
 
   const previewWarnings = useMemo(() => {
     if (!parseResult?.rows.length) {
@@ -524,7 +581,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
         orgId,
         filename: file.name,
         headers: parseResult.headers,
-        rows: parseResult.rows,
+        rows: importRows,
         mappings,
         orgConstraints,
         orgCaseTypes,
@@ -547,6 +604,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
     }
   }, [
     parseResult,
+    importRows,
     file,
     orgId,
     mappings,
@@ -1187,7 +1245,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                               </div>
                             ) : null}
 
-                            {mapping.role === 'booking_link' || mapping.role === 'phone' ? (
+                            {LOCATION_SCOPED_ROLES.includes(mapping.role) ? (
                               <select
                                 value={mapping.locationScope ?? ''}
                                 onChange={(e) => updateMapping(index, { locationScope: e.target.value })}
@@ -1205,8 +1263,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
 
                             {mapping.role !== 'location' &&
                             mapping.role !== 'constraint' &&
-                            mapping.role !== 'booking_link' &&
-                            mapping.role !== 'phone' ? (
+                            !LOCATION_SCOPED_ROLES.includes(mapping.role) ? (
                               <span className="text-sm text-slate-400">—</span>
                             ) : null}
                           </td>
@@ -1228,9 +1285,11 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
           {step === 3 ? (
             <div>
               {conflicts.length === 0 ? (
-                <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-6 text-center">
-                  <p className="font-medium text-green-900">No duplicates detected. Ready to import!</p>
-                </div>
+                nameFixes.length === 0 ? (
+                  <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-6 text-center">
+                    <p className="font-medium text-green-900">No duplicates detected. Ready to import!</p>
+                  </div>
+                ) : null
               ) : (
                 <div>
                   <h3 className="mb-2 text-lg font-semibold text-slate-900">
@@ -1269,7 +1328,14 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                         {conflicts.map((c) => (
                           <tr key={`${c.rowIndex}-${c.existingProvider.id}`} className="border-b border-slate-100 last:border-0">
                             <td className="px-3 py-2 font-medium text-slate-800">{c.incomingName}</td>
-                            <td className="px-3 py-2 text-slate-700">{c.existingProvider.name}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {c.existingProvider.name}
+                              {c.existingProvider.is_archived ? (
+                                <span className="ml-2 inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </td>
                             <td className="px-3 py-2">
                               {c.matchType === 'exact' ? (
                                 <span className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
@@ -1299,7 +1365,7 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                                     }
                                     className="text-indigo-600"
                                   />
-                                  Merge (update existing)
+                                  {c.existingProvider.is_archived ? 'Merge (restore and update)' : 'Merge (update existing)'}
                                 </label>
                                 <label className="flex cursor-pointer items-center gap-1.5 text-xs">
                                   <input
@@ -1340,6 +1406,50 @@ export default function ImportWizard({ isOpen, onClose, onComplete, orgId }: Imp
                   </div>
                 </div>
               )}
+              {nameFixes.length > 0 ? (
+                <div className={conflicts.length > 0 ? 'mt-6' : ''}>
+                  <h3 className="mb-1 text-lg font-semibold text-slate-900">These names look misspelled</h3>
+                  <p className="mb-3 text-sm text-slate-600">
+                    Each looks like the same thing written two ways: a name you already have, or an earlier row in
+                    this file. Matching them keeps one clean list instead of adding a near-duplicate beside the real
+                    one.
+                  </p>
+                  <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    {nameFixes.map((fix) => {
+                      const key = nameFixKey(fix)
+                      return (
+                        <li key={key} className="px-3 py-2 text-sm">
+                          <label className="flex cursor-pointer items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={!skippedNameFixes.has(key)}
+                              onChange={(e) =>
+                                setSkippedNameFixes((prev) => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.delete(key)
+                                  else next.add(key)
+                                  return next
+                                })
+                              }
+                            />
+                            <span>
+                              Treat <span className="font-medium text-slate-900">“{fix.incoming}”</span> as{' '}
+                              <span className="font-medium text-slate-900">“{fix.suggested}”</span>
+                              <span className="ml-2 text-xs text-slate-500">
+                                {fix.kind === 'caseType'
+                                  ? 'Case type'
+                                  : fix.kind === 'category'
+                                    ? 'Category'
+                                    : 'Provider, earlier in this file'}
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {step === 4 && parseResult ? (

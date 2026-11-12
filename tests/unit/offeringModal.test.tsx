@@ -84,7 +84,8 @@ describe('OfferingModal', () => {
       providerId: 'p2',
       caseTypeId: 'ct2',
       locationIds: ['l2'],
-      constraints: { sports_only: 1, age_min: '13', age_max: '99' },
+      // Typed into number boxes, saved as numbers.
+      constraints: { sports_only: 1, age_min: 13, age_max: 99 },
     })
   })
 

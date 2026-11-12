@@ -184,3 +184,65 @@ describe('buildBodyMap', () => {
     expect(spot('neck').getAttribute('tabindex')).toBe('0')
   })
 })
+
+describe('spots the admin placed', () => {
+  const placed = {
+    id: 'pec',
+    name: 'Pectoral',
+    map_tag: null,
+    map_view: 'front',
+    map_x: 45,
+    map_y: 27,
+    map_label_x: 90,
+    map_label_y: 25,
+  }
+  const withCustom = [...caseTypes, placed]
+
+  it('are placed beside the built-in ones, and no longer listed as buttons', () => {
+    const { placed: spots, unplaced } = partitionCaseTypes(withCustom)
+    expect(spots.map((s: { spot: { tag: string } }) => s.spot.tag)).toEqual(['knee', 'neck', 'custom-pec'])
+    expect(unplaced.map((c: { id: string }) => c.id)).toEqual(['general'])
+  })
+
+  it('draw a dot named for the case type and the label the admin chose', () => {
+    const custom = buildBodyMap(document, withCustom, onSelect)!
+    const dot = custom.querySelector('.pm-bodymap-spot[data-tag="custom-pec"]')!
+    expect(dot.getAttribute('aria-label')).toBe('Pectoral')
+    const label = custom.querySelector('.pm-bodymap-callout[data-tag="custom-pec"] .pm-bodymap-label')!
+    expect(label.textContent).toBe('Pectoral')
+    expect(label.getAttribute('text-anchor')).toBe('start')
+  })
+
+  it('split a long name over two lines', () => {
+    const custom = buildBodyMap(document, [{ ...placed, name: 'Rotator Cuff Tear' }], onSelect)!
+    const lines = Array.from(custom.querySelectorAll('.pm-bodymap-label tspan')).map((t) => t.textContent)
+    expect(lines).toEqual(['Rotator', 'Cuff Tear'])
+  })
+
+  it('still get a label beside the dot when the admin placed none', () => {
+    const custom = buildBodyMap(document, [{ ...placed, map_label_x: null, map_label_y: null }], onSelect)!
+    expect(custom.querySelector('.pm-bodymap-label')!.textContent).toBe('Pectoral')
+  })
+
+  it('make a map out of a case type placed alone', () => {
+    expect(buildBodyMap(document, [placed], onSelect)).not.toBeNull()
+  })
+
+  it('zoom and select like any other spot', () => {
+    const custom = buildBodyMap(document, withCustom, onSelect)!
+    document.body.appendChild(custom)
+    custom
+      .querySelector('.pm-bodymap-spot[data-tag="custom-pec"]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(custom.querySelector('.pm-bodymap-heading')!.textContent).toBe('Pectoral')
+    const next = Array.from(custom.querySelectorAll('button')).find((b) => /Continue/.test(b.textContent ?? ''))!
+    next.click()
+    expect(onSelect).toHaveBeenCalledWith(placed)
+  })
+
+  it('are listed as buttons, not lost, when the position is incomplete', () => {
+    const { placed: spots, unplaced } = partitionCaseTypes([{ ...placed, map_y: null }])
+    expect(spots).toEqual([])
+    expect(unplaced).toHaveLength(1)
+  })
+})

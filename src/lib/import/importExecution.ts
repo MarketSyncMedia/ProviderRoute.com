@@ -1,4 +1,5 @@
-import { fuzzyMatch, normalizeName } from '../parsers/nameNormalizer'
+import { normalizeName } from '../parsers/nameNormalizer'
+import { compareProviderNames, matchInitialOnly, parseProviderName } from '../parsers/providerName'
 import { supabase } from '../supabase'
 import type { CaseType, Category, Constraint, Provider } from '../../types/database'
 
@@ -26,12 +27,14 @@ export function detectConflicts(
   existingProviders: Provider[]
 ): ConflictItem[] {
   const conflicts: ConflictItem[] = []
+  const existingParts = existingProviders.map((provider) => parseProviderName(provider.name))
 
   rows.forEach((row, rowIndex) => {
     const raw = (row[providerHeader] ?? '').trim()
     if (!raw) return
     const incomingNorm = normalizeName(raw)
 
+    // The same name as stored, ignoring only case and punctuation.
     const exactMatch = existingProviders.find((provider) => {
       const existing = (provider.normalized_name ?? normalizeName(provider.name)).trim()
       return incomingNorm === existing
@@ -41,23 +44,37 @@ export function detectConflicts(
       return
     }
 
-    let bestProvider: Provider | null = null
-    let bestScore = 0
-    for (const provider of existingProviders) {
-      const existing = (provider.normalized_name ?? normalizeName(provider.name)).trim()
-      const score = fuzzyMatch(incomingNorm, existing)
-      if (score > bestScore) {
-        bestScore = score
-        bestProvider = provider
+    // Otherwise compare as names, so titles, credentials and name order don't hide a match.
+    const incoming = parseProviderName(raw)
+    let bestIndex = -1
+    let best: { matchType: 'exact' | 'fuzzy'; score: number } | null = null
+    existingParts.forEach((parts, index) => {
+      const match = compareProviderNames(incoming, parts)
+      if (match && (!best || match.score > best.score)) {
+        best = match
+        bestIndex = index
       }
-    }
-    if (bestProvider && bestScore > 0.85) {
+    })
+    if (best && bestIndex >= 0) {
+      const { matchType, score } = best as { matchType: 'exact' | 'fuzzy'; score: number }
       conflicts.push({
         rowIndex,
         incomingName: raw,
-        existingProvider: bestProvider,
+        existingProvider: existingProviders[bestIndex],
+        matchType,
+        ...(matchType === 'fuzzy' ? { similarity: score } : {}),
+      })
+      return
+    }
+
+    const initialOnly = matchInitialOnly(incoming, existingParts)
+    if (initialOnly !== null) {
+      conflicts.push({
+        rowIndex,
+        incomingName: raw,
+        existingProvider: existingProviders[initialOnly],
         matchType: 'fuzzy',
-        similarity: bestScore,
+        similarity: 0.8,
       })
     }
   })
