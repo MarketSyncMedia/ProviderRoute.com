@@ -108,6 +108,17 @@ describe('QuestionsPage system questions', () => {
     expect(questionsApi.createQuestion).not.toHaveBeenCalled()
   })
 
+  it('calls archiving a question archiving, since that is what it does', async () => {
+    questionsApi.getQuestions.mockResolvedValue([entry, location])
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Archive question' }))
+
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /delete|remove/i })).not.toBeInTheDocument()
+  })
+
   it('still adds a system question the flow does not have yet', async () => {
     questionsApi.getQuestions.mockResolvedValue([entry])
     const user = userEvent.setup()

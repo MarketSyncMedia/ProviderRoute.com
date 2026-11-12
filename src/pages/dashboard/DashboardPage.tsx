@@ -94,34 +94,46 @@ export default function DashboardPage() {
       ) : data ? (
         <>
           <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <Link
+              to="/providers"
+              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-300 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50">
                 <Users className="h-5 w-5 text-indigo-600" aria-hidden />
               </div>
               <p className="mt-3 text-3xl font-bold text-slate-900">{data.providersCount}</p>
               <p className="mt-1 text-sm text-slate-500">Providers</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            </Link>
+            <Link
+              to="/locations"
+              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-300 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50">
                 <MapPin className="h-5 w-5 text-emerald-600" aria-hidden />
               </div>
               <p className="mt-3 text-3xl font-bold text-slate-900">{data.locationsCount}</p>
               <p className="mt-1 text-sm text-slate-500">Locations</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            </Link>
+            <Link
+              to="/case-types"
+              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-300 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50">
                 <Stethoscope className="h-5 w-5 text-violet-600" aria-hidden />
               </div>
               <p className="mt-3 text-3xl font-bold text-slate-900">{data.caseTypesCount}</p>
               <p className="mt-1 text-sm text-slate-500">Case Types</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            </Link>
+            <Link
+              to="/widgets"
+              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-300 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50">
                 <Globe className="h-5 w-5 text-amber-600" aria-hidden />
               </div>
               <p className="mt-3 text-3xl font-bold text-slate-900">{data.widgetsCount}</p>
               <p className="mt-1 text-sm text-slate-500">Widgets</p>
-            </div>
+            </Link>
           </div>
 
           <section className="mb-8">

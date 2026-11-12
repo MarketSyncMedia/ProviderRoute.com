@@ -110,6 +110,21 @@ describe('DataTablePage add offering', () => {
     alertSpy.mockRestore()
   })
 
+  it('says so when adding brought back an archived offering', async () => {
+    offeringsApi.createOffering.mockResolvedValue({ data: { id: 'o1' }, error: null, restored: true })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /^add$/i }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add Offering' })
+    await waitFor(() => expect(within(dialog).getByRole('option', { name: 'Dr. Adams' })).toBeInTheDocument())
+    await user.selectOptions(within(dialog).getByLabelText('Provider'), 'p1')
+    await user.selectOptions(within(dialog).getByLabelText('Case Type'), 'ct1')
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived offering restored with these details'))
+  })
+
   it('keeps the form open and shows the error when the save fails', async () => {
     offeringsApi.createOffering.mockResolvedValue({ data: null, error: 'permission denied' })
     const user = userEvent.setup()

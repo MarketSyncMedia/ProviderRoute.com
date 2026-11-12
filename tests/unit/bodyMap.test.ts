@@ -37,6 +37,7 @@ describe('spotsMatchingName', () => {
     expect(spotsMatchingName('Knee Pain').map((s) => s.tag)).toEqual(['knee'])
     expect(spotsMatchingName('LOWER-BACK pain').map((s) => s.tag)).toEqual(['low-back'])
     expect(spotsMatchingName('Shin Splints').map((s) => s.tag)).toEqual(['shin-splints'])
+    expect(spotsMatchingName('Biceps Tendon').map((s) => s.tag)).toEqual(['bicep'])
   })
 
   it('does not match inside other words', () => {

@@ -1,4 +1,5 @@
 import { supabase } from '../supabase'
+import type { MapPlacement } from '../../shared/bodyMap'
 import type { CaseType } from '../../types/database'
 import { selectAllRows } from './paginate'
 
@@ -56,12 +57,50 @@ export async function updateCaseType(id: string, name: string): Promise<{ error:
   return { error: error?.message ?? null }
 }
 
-/** Links a case type to a body map spot, or unlinks it with `null`. */
+const NO_MAP_POSITION = {
+  map_view: null,
+  map_x: null,
+  map_y: null,
+  map_label_x: null,
+  map_label_y: null,
+} as const
+
+/**
+ * Links a case type to a built-in body map spot, or takes it off the map with
+ * `null`. Either way it drops any position the admin placed it at: a case
+ * type sits on a built-in spot or its own position, never both.
+ */
 export async function updateCaseTypeMapTag(
   id: string,
   mapTag: string | null,
 ): Promise<{ error: string | null }> {
-  const { error } = await supabase.from('case_types').update({ map_tag: mapTag }).eq('id', id)
+  const { error } = await supabase
+    .from('case_types')
+    .update({ map_tag: mapTag, ...NO_MAP_POSITION })
+    .eq('id', id)
+
+  return { error: error?.message ?? null }
+}
+
+/**
+ * Puts a case type on the body map at a position the admin chose, or takes it
+ * off the map with `null`. Drops any built-in spot it was linked to.
+ */
+export async function updateCaseTypeMapPosition(
+  id: string,
+  position: MapPlacement | null,
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('case_types')
+    .update({
+      map_tag: null,
+      map_view: position?.view ?? null,
+      map_x: position?.x ?? null,
+      map_y: position?.y ?? null,
+      map_label_x: position?.labelX ?? null,
+      map_label_y: position?.labelY ?? null,
+    })
+    .eq('id', id)
 
   return { error: error?.message ?? null }
 }
@@ -158,8 +197,7 @@ export interface CaseTypeProvider {
 
 /**
  * The live providers offering a case type, so it can be archived for just
- * some of them. A provider can offer one case type several times (different
- * locations or constraints); those offerings are grouped under one entry.
+ * some of them.
  */
 export async function getCaseTypeProviders(caseTypeId: string): Promise<CaseTypeProvider[]> {
   // offerings -> providers is many-to-one, so PostgREST embeds one object; the
@@ -216,8 +254,9 @@ export async function getCaseTypeOfferingCounts(
   const rows = await selectAllRows<{ case_type_id: string | null }>((from, to) =>
     supabase
       .from('offerings')
-      .select('case_type_id')
+      .select('case_type_id, providers!inner()')
       .eq('is_archived', false)
+      .eq('providers.is_archived', false)
       .in('case_type_id', caseTypeIds)
       .range(from, to),
   )

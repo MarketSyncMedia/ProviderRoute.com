@@ -4,6 +4,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import { useToast } from '../../components/ui/toastStore'
 import { archiveCaseType, getCaseTypeProviders } from '../../lib/api/caseTypes'
 import { archiveOfferings } from '../../lib/api/dataTable'
+import { invalidateOfferingReaders } from '../../lib/invalidateOfferingReaders'
 import { useAuthStore } from '../../stores/authStore'
 import type { CaseType } from '../../types/database'
 
@@ -55,7 +56,8 @@ export default function ArchiveCaseTypeDialog({
         toast.error(error)
         return
       }
-      await refresh()
+      // Its offerings drop out of the data table and provider pages.
+      await Promise.all([refresh(), invalidateOfferingReaders(queryClient, orgId)])
       close()
       toast.success(`${caseType.name} archived for all providers`)
       return
@@ -68,12 +70,7 @@ export default function ArchiveCaseTypeDialog({
       toast.error(error)
       return
     }
-    await Promise.all([
-      refresh(),
-      queryClient.invalidateQueries({ queryKey: ['case-type-providers', caseType.id] }),
-      queryClient.invalidateQueries({ queryKey: ['data-table-offerings', orgId] }),
-      queryClient.invalidateQueries({ queryKey: ['provider-offerings'] }),
-    ])
+    await Promise.all([refresh(), invalidateOfferingReaders(queryClient, orgId)])
     close()
     toast.success(
       `${caseType.name} archived for ${chosen.length} ${chosen.length === 1 ? 'provider' : 'providers'}`,

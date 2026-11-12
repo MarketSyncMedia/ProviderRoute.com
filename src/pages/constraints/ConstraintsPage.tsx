@@ -15,6 +15,7 @@ import {
 } from '../../lib/api/constraints'
 import { useAuthStore } from '../../stores/authStore'
 import type { Constraint } from '../../types/database'
+import ArchivedConstraints from './ArchivedConstraints'
 
 type ConstraintRow = { constraint: Constraint; questionCount: number }
 
@@ -245,6 +246,8 @@ export default function ConstraintsPage() {
         </div>
       )}
 
+      <ArchivedConstraints />
+
       <ConstraintModal
         isOpen={modal.type === 'add'}
         title="Add Constraint"
@@ -268,7 +271,7 @@ export default function ConstraintsPage() {
         title="Archive Constraint"
         message={
           modal.type === 'archive' && modal.payload
-            ? `Archive ${modal.payload.name}? It will no longer be available for questions or filtering.`
+            ? `Archive ${modal.payload.name}? It will no longer be available for questions or filtering. Restore it from Archived constraints.`
             : ''
         }
         confirmLabel="Archive"

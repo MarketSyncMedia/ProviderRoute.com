@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { CaseType, Constraint, Location, Provider } from '../../types/database'
+import { coerceRangeValues } from '../../lib/constraintValues'
 import type { OfferingDraft } from './offeringDraft'
 
 interface OfferingModalProps {
@@ -49,7 +50,7 @@ export default function OfferingModal({
       return
     }
     setValidationError('')
-    onSave(draft)
+    onSave({ ...draft, constraints: coerceRangeValues(draft.constraints, constraints) })
   }
 
   const shownError = validationError || error

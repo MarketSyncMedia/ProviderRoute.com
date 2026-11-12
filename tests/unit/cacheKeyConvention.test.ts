@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -59,6 +59,31 @@ const AUGMENTED_LISTS = [
 function read(file: string): string {
   return readFileSync(resolve(process.cwd(), file), 'utf8')
 }
+
+/** The loader every reader of a shared plain list key must use. */
+const SHARED_LISTS = [
+  ['case-types', 'getCaseTypes'],
+  ['categories', 'getCategories'],
+  ['locations', 'getLocations'],
+  ['constraints', 'getConstraints'],
+] as const
+
+describe('shared list loaders', () => {
+  const sources = readdirSync(resolve(process.cwd(), 'src'), { recursive: true, encoding: 'utf8' })
+    .filter((file) => file.endsWith('.tsx'))
+    .map((file) => ({ file, src: read(`src/${file}`) }))
+
+  // Pages sharing a key used to load it their own way, some sorted and some
+  // not. Whichever opened first set the order everywhere: a case type dropdown
+  // could ignore the drag order the admin chose on the Case Types page.
+  it.each(SHARED_LISTS)('every ["%s", orgId] query loads with %s', (key, loader) => {
+    const declaration = new RegExp(`queryKey: \\['${key}', orgId\\],\\s*queryFn: (.*)`, 'g')
+    const loaders = sources.flatMap(({ src }) => [...src.matchAll(declaration)].map((match) => match[1].trim()))
+
+    expect(loaders.length).toBeGreaterThan(0)
+    expect(new Set(loaders)).toEqual(new Set([`() => ${loader}(orgId),`]))
+  })
+})
 
 describe('augmented list cache keys', () => {
   it.each(AUGMENTED_LISTS)(

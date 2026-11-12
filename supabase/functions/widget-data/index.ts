@@ -61,7 +61,7 @@ serve(async (req) => {
 
     const { data: widget, error: widgetError } = await supabase
       .from('widgets')
-      .select('id,org_id,status,primary_color,button_text,greeting_text,disclaimer_text,privacy_url,fallback_message,embed_mode,show_worth_the_drive,question_order,published_snapshot,open_delay_enabled,open_delay_seconds,button_animation,button_subtext,button_icon_type,button_icon_value')
+      .select('id,org_id,status,primary_color,button_text,greeting_text,disclaimer_text,privacy_url,fallback_message,embed_mode,show_worth_the_drive,question_order,published_snapshot,open_delay_enabled,open_delay_seconds,button_animation,button_subtext,button_icon_type,button_icon_value,booking_button_text,self_schedule_button_text')
       .eq('id', widgetId)
       .eq('status', 'live')
       .single()
@@ -113,7 +113,7 @@ serve(async (req) => {
     ] = await Promise.all([
       supabase
         .from('organizations')
-        .select('fallback_phone,fallback_message,allowed_domains,default_booking_mode,default_phone_mode')
+        .select('fallback_phone,fallback_message,allowed_domains,default_booking_mode,default_phone_mode,default_self_schedule_mode')
         .eq('id', orgId)
         .single(),
       // This endpoint is public. Keep these projections deliberately narrow so
@@ -122,7 +122,7 @@ serve(async (req) => {
       selectAllRows((from, to) =>
         supabase
           .from('providers')
-          .select('id,name,subtitle,bio_link,image_url,category_ids,booking_mode,phone_mode')
+          .select('id,name,subtitle,bio_link,image_url,category_ids,booking_mode,phone_mode,self_schedule_mode')
           .eq('org_id', orgId)
           .eq('is_archived', false)
           .order('id')
@@ -140,7 +140,7 @@ serve(async (req) => {
       selectAllRows((from, to) =>
         supabase
           .from('case_types')
-          .select('id,name,sort_order,map_tag')
+          .select('id,name,sort_order,map_tag,map_view,map_x,map_y,map_label_x,map_label_y')
           .eq('org_id', orgId)
           .eq('is_archived', false)
           .order('name')
@@ -258,7 +258,7 @@ serve(async (req) => {
         selectAllRows((from, to) =>
           supabase
             .from('provider_locations')
-            .select('provider_id,location_id,booking_link,phone,bio_link')
+            .select('provider_id,location_id,booking_link,self_schedule_link,phone,bio_link')
             .in('provider_id', ids)
             .order('id')
             .range(from, to)
@@ -267,6 +267,7 @@ serve(async (req) => {
       providerLocations = chunks.flat().filter((pl) => locationIds.has(pl.location_id)).map((providerLocation) => ({
         ...providerLocation,
         booking_link: safeHttpsUrl(providerLocation.booking_link),
+        self_schedule_link: safeHttpsUrl(providerLocation.self_schedule_link),
         bio_link: safeHttpsUrl(providerLocation.bio_link),
         phone: safePhone(providerLocation.phone),
       }))
@@ -290,6 +291,9 @@ serve(async (req) => {
           show_worth_the_drive: widget.show_worth_the_drive,
           default_booking_mode: org?.default_booking_mode || 'simple',
           default_phone_mode: org?.default_phone_mode || 'simple',
+          default_self_schedule_mode: org?.default_self_schedule_mode || 'simple',
+          booking_button_text: widget.booking_button_text,
+          self_schedule_button_text: widget.self_schedule_button_text,
           open_delay_enabled: widget.open_delay_enabled,
           open_delay_seconds: widget.open_delay_seconds,
           button_animation: widget.button_animation,
