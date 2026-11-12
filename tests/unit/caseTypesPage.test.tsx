@@ -50,6 +50,7 @@ vi.mock('../../src/lib/api/caseTypes', () => api)
 vi.mock('../../src/lib/api/dataTable', () => dataTableApi)
 vi.mock('../../src/components/ui/toastStore', () => ({ useToast: () => ({ toast }) }))
 
+import { bodyMapSpot } from '../../src/shared/bodyMap'
 import CaseTypesPage from '../../src/pages/case-types/CaseTypesPage'
 import { useAuthStore } from '../../src/stores/authStore'
 
@@ -218,91 +219,114 @@ describe('CaseTypesPage modal state', () => {
 })
 
 describe('CaseTypesPage body map section', () => {
-  it('links the case type picked for a spot', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    const select = await screen.findByRole('combobox', { name: 'Case type for Knee' })
-    expect(select).toHaveValue('')
+  const knee = bodyMapSpot('knee')!
+  const section = async (count: number) =>
+    (await screen.findByRole('heading', { name: new RegExp(`^on the body map \\(${count}\\)`, 'i') })).parentElement!
 
-    await user.selectOptions(select, 'Knee Pain')
-
-    expect(api.updateCaseTypeMapTag).toHaveBeenCalledTimes(1)
-    expect(api.updateCaseTypeMapTag).toHaveBeenCalledWith('ct1', 'knee')
+  beforeEach(() => {
+    api.updateCaseTypeMapPosition.mockResolvedValue({ error: null })
   })
 
-  it('unlinks the current holder before linking another case type to its spot', async () => {
+  it('lists every case type on the map in one list, standard spot or placed by hand', async () => {
     api.getCaseTypes.mockResolvedValue([
       caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' }),
-      caseType({ id: 'ct2', name: 'Shoulder Pain', sort_order: 1 }),
+      caseType({ id: 'pec', name: 'Pectoral', sort_order: 1, map_view: 'front', map_x: 45, map_y: 27 } as Partial<CaseType>),
+      caseType({ id: 'ct2', name: 'Shoulder Pain', sort_order: 2 }),
     ])
-    const user = userEvent.setup()
     renderPage()
-    const select = await screen.findByRole('combobox', { name: 'Case type for Knee' })
-    await waitFor(() => expect(select).toHaveValue('ct1'))
 
-    await user.selectOptions(select, 'Shoulder Pain')
-
-    await waitFor(() => expect(api.updateCaseTypeMapTag).toHaveBeenCalledTimes(2))
-    expect(api.updateCaseTypeMapTag.mock.calls).toEqual([
-      ['ct1', null],
-      ['ct2', 'knee'],
-    ])
+    const onMap = await section(2)
+    expect(within(onMap).getByText('Knee Pain')).toBeInTheDocument()
+    expect(within(onMap).getByText('Pectoral')).toBeInTheDocument()
+    expect(within(onMap).queryByText('Shoulder Pain')).not.toBeInTheDocument()
+    // Both kinds get the same Move and Remove buttons.
+    expect(within(onMap).getByRole('button', { name: 'Move Knee Pain on the body map' })).toBeInTheDocument()
+    expect(within(onMap).getByRole('button', { name: 'Move Pectoral on the body map' })).toBeInTheDocument()
+    const offMap = (await screen.findByRole('heading', { name: /not on the body map \(1\)/i })).parentElement!
+    expect(within(offMap).getByText('Shoulder Pain')).toBeInTheDocument()
+    expect(screen.getByText('2 of 3 case types on the map')).toBeInTheDocument()
+    expect(screen.queryByText(/placed by you/i)).not.toBeInTheDocument()
   })
 
-  it('does not link the new case type if unlinking the holder fails', async () => {
+  it('marks linked rows in the list', async () => {
+    api.getCaseTypes.mockResolvedValue([caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' })])
+    renderPage()
+    expect(within(await row('Knee Pain')).getByText('Knee')).toBeInTheDocument()
+  })
+
+  it('never shows a case type that was archived, even one that kept its spot', async () => {
     api.getCaseTypes.mockResolvedValue([
       caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' }),
-      caseType({ id: 'ct2', name: 'Shoulder Pain', sort_order: 1 }),
+      caseType({ id: 'neck', name: 'Neck', sort_order: 1, map_tag: 'neck', is_archived: true }),
     ])
-    api.updateCaseTypeMapTag.mockResolvedValueOnce({ error: 'permission denied' })
-    const user = userEvent.setup()
     renderPage()
-    const select = await screen.findByRole('combobox', { name: 'Case type for Knee' })
-    await waitFor(() => expect(select).toHaveValue('ct1'))
 
-    await user.selectOptions(select, 'Shoulder Pain')
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('permission denied'))
-    expect(api.updateCaseTypeMapTag).toHaveBeenCalledTimes(1)
+    const onMap = await section(1)
+    expect(within(onMap).queryByText('Neck')).not.toBeInTheDocument()
+    expect(screen.getByText('1 of 1 case types on the map')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Neck/ })).not.toBeInTheDocument()
   })
 
-  it('moves a case type already on another spot with one update', async () => {
+  it('removes a case type from the map with null, whichever kind of spot it had', async () => {
     api.getCaseTypes.mockResolvedValue([caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' })])
     const user = userEvent.setup()
     renderPage()
-    const select = await screen.findByRole('combobox', { name: 'Case type for Shoulder' })
+    await user.click(await screen.findByRole('button', { name: 'Remove Knee Pain from the body map' }))
 
-    await user.selectOptions(select, 'Knee Pain (moves from Knee)')
-
-    expect(api.updateCaseTypeMapTag).toHaveBeenCalledTimes(1)
-    expect(api.updateCaseTypeMapTag).toHaveBeenCalledWith('ct1', 'shoulder')
-  })
-
-  it('removes a spot from the body map with null, not an empty string', async () => {
-    api.getCaseTypes.mockResolvedValue([caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' })])
-    const user = userEvent.setup()
-    renderPage()
-    const remove = await screen.findByRole('button', { name: 'Remove Knee from the body map' })
-    expect(screen.getByRole('button', { name: 'Remove Shoulder from the body map' })).toBeDisabled()
-
-    await user.click(remove)
-
-    expect(api.updateCaseTypeMapTag).toHaveBeenCalledWith('ct1', null)
+    expect(api.updateCaseTypeMapPosition).toHaveBeenCalledWith('ct1', null)
+    expect(api.updateCaseTypeMapTag).not.toHaveBeenCalled()
     expect(api.archiveCaseType).not.toHaveBeenCalled()
   })
 
-  it('marks linked rows in the list and lists the case types not on the map', async () => {
-    api.getCaseTypes.mockResolvedValue([
-      caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' }),
-      caseType({ id: 'ct2', name: 'Shoulder Pain', sort_order: 1 }),
-    ])
+  it('moves a standard-spot case type from where it sits, saving its own position', async () => {
+    api.getCaseTypes.mockResolvedValue([caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' })])
+    const user = userEvent.setup()
     renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Move Knee Pain on the body map' }))
+    const dialog = screen.getByRole('dialog', { name: 'Place Knee Pain on the body map' })
+    await user.click(within(dialog).getByRole('button', { name: 'Place the dot' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Nudge right' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Save placement' }))
 
-    expect(within(await row('Knee Pain')).getByText('Knee')).toBeInTheDocument()
-    const offMap = (await screen.findByRole('heading', { name: /not on the body map \(1\)/i })).parentElement!
-    expect(within(offMap).getByText('Shoulder Pain')).toBeInTheDocument()
-    expect(within(offMap).queryByText('Knee Pain')).not.toBeInTheDocument()
-    expect(screen.getByText('1 of 18 spots linked')).toBeInTheDocument()
+    await waitFor(() => expect(api.updateCaseTypeMapPosition).toHaveBeenCalledTimes(1))
+    const [id, position] = api.updateCaseTypeMapPosition.mock.calls[0]
+    expect(id).toBe('ct1')
+    expect(position).toMatchObject({ view: 'front', x: knee.x + 1, y: knee.y })
+    // The label starts where the widget draws the standard one.
+    expect(position.labelX).not.toBeNull()
+    expect(position.labelY).not.toBeNull()
+  })
+
+  it('starts a case type from a standard spot', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Place Knee Pain on the body map' }))
+    const dialog = screen.getByRole('dialog', { name: 'Place Knee Pain on the body map' })
+    expect(within(dialog).getByRole('button', { name: 'Save placement' })).toBeDisabled()
+
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Start from a standard spot' }), 'Knee')
+    await user.click(within(dialog).getByRole('button', { name: 'Save placement' }))
+
+    await waitFor(() => expect(api.updateCaseTypeMapPosition).toHaveBeenCalledTimes(1))
+    expect(api.updateCaseTypeMapPosition.mock.calls[0][1]).toMatchObject({ view: 'front', x: knee.x, y: knee.y })
+  })
+
+  it('offers only the standard spots no other case type is using', async () => {
+    api.getCaseTypes.mockResolvedValue([
+      caseType({ id: 'ct1', name: 'Knee Pain' }),
+      caseType({ id: 'ct2', name: 'Shoulder Pain', sort_order: 1, map_tag: 'shoulder' }),
+      caseType({ id: 'neck', name: 'Neck', sort_order: 2, map_tag: 'neck', is_archived: true }),
+    ])
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Place Knee Pain on the body map' }))
+    const select = screen.getByRole('combobox', { name: 'Start from a standard spot' })
+
+    const options = within(select).getAllByRole('option').map((o) => o.textContent)
+    expect(options).toContain('Knee')
+    expect(options).not.toContain('Shoulder')
+    // An archived case type frees its spot while it is archived.
+    expect(options).toContain('Neck')
   })
 
   it('applies only the suggestions left ticked', async () => {
@@ -439,13 +463,13 @@ describe('CaseTypesPage placing case types on the body map', () => {
       api.getCaseTypes.mockResolvedValue([caseType(), placed()])
     })
 
-    it('is listed as placed by the admin, not as off the map', async () => {
+    it('is listed on the map, not as off the map', async () => {
       renderPage()
-      const section = (await screen.findByRole('heading', { name: /placed by you \(1\)/i })).parentElement!
+      const section = (await screen.findByRole('heading', { name: /^on the body map \(1\)/i })).parentElement!
       expect(within(section).getByText('Pectoral')).toBeInTheDocument()
       const offMap = (await screen.findByRole('heading', { name: /not on the body map \(1\)/i })).parentElement!
       expect(within(offMap).queryByText('Pectoral')).not.toBeInTheDocument()
-      expect(screen.getByText(/0 of 18 spots linked, plus 1 you placed/)).toBeInTheDocument()
+      expect(screen.getByText('1 of 2 case types on the map')).toBeInTheDocument()
     })
 
     it('opens with its spot when moved', async () => {

@@ -13,7 +13,7 @@ import {
   resolveSpot,
   viewAt,
 } from '../../src/shared/bodyMap'
-import { BODY_MAP_LABELS, labelLayout } from '../../src/shared/bodyMapLabels'
+import { BODY_MAP_LABELS, labelLayout, spotPlacement } from '../../src/shared/bodyMapLabels'
 import { VIEW_FRAMES } from '../../src/shared/bodyOutline'
 
 /**
@@ -165,5 +165,27 @@ describe('the database check', () => {
     const check = defining.at(-1)!
     expect(check).toContain(`BETWEEN ${LABEL_MIN} AND ${LABEL_MAX}`)
     expect(check).toContain(`map_view IN ('front', 'back')`)
+  })
+})
+
+describe('spotPlacement', () => {
+  it('writes a standard spot as a placement with its label where the widget draws it', () => {
+    const knee = bodyMapSpot('knee')!
+    const placement = spotPlacement(knee)
+    expect(placement).toMatchObject({ view: 'front', x: knee.x, y: knee.y })
+    // Drawing it back as a custom spot puts the label at the standard slot.
+    const at = framePoint('front', placement.labelX!, placement.labelY!)
+    expect(at.x).toBeCloseTo(BODY_MAP_LABELS.knee.x, 0)
+    expect(at.y).toBeCloseTo(BODY_MAP_LABELS.knee.y, 0)
+  })
+
+  it('keeps every standard label inside the range the database allows', () => {
+    for (const tag of Object.keys(BODY_MAP_LABELS)) {
+      const p = spotPlacement(bodyMapSpot(tag)!)
+      expect(p.labelX!).toBeGreaterThanOrEqual(LABEL_MIN)
+      expect(p.labelX!).toBeLessThanOrEqual(LABEL_MAX)
+      expect(p.labelY!).toBeGreaterThanOrEqual(LABEL_MIN)
+      expect(p.labelY!).toBeLessThanOrEqual(LABEL_MAX)
+    }
   })
 })
