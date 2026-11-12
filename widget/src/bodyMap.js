@@ -144,11 +144,20 @@ export function buildBodyMap(doc, caseTypes, onSelect, options) {
   var root = doc.createElement('div')
   root.className = 'pm-bodymap'
 
-  // The switch between the diagram and a plain list of every case type, for
-  // anyone who would rather read than find their spot on a figure.
+  // An on/off switch between the diagram and a plain list of every case type,
+  // for anyone who would rather read than find their spot on a figure. On
+  // means the list. Its label never changes; the switch itself shows the state.
   var toggle = doc.createElement('button')
   toggle.type = 'button'
   toggle.className = 'pm-bodymap-toggle'
+  toggle.setAttribute('role', 'switch')
+  var toggleLabel = doc.createElement('span')
+  toggleLabel.textContent = 'List view'
+  var toggleTrack = doc.createElement('span')
+  toggleTrack.className = 'pm-bodymap-track'
+  toggleTrack.appendChild(doc.createElement('span')).className = 'pm-bodymap-thumb'
+  toggle.appendChild(toggleLabel)
+  toggle.appendChild(toggleTrack)
   root.appendChild(toggle)
 
   var stage = doc.createElement('div')
@@ -363,7 +372,7 @@ export function buildBodyMap(doc, caseTypes, onSelect, options) {
     stage.hidden = listView
     fullList.hidden = !listView
     if (other) other.hidden = listView
-    toggle.textContent = listView ? 'Switch to diagram view' : 'Switch to list view'
+    toggle.setAttribute('aria-checked', String(listView))
   }
   toggle.onclick = function () {
     showView(!listView)
@@ -380,9 +389,13 @@ export function bodyMapStyles(primaryColor) {
     '.pm-bodymap{display:flex;flex-direction:column;gap:10px;}',
     // The class rules below set display, which would beat the hidden attribute.
     '.pm-bodymap [hidden]{display:none !important;}',
-    '.pm-bodymap-toggle{align-self:flex-end;background:#fff;color:#334155;border:1px solid #cbd5e1;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}',
-    '.pm-bodymap-toggle:hover{border-color:' + primaryColor + ';color:' + primaryColor + ';}',
-    '.pm-bodymap-toggle:focus-visible{outline:2px solid ' + primaryColor + ';outline-offset:2px;}',
+    '.pm-bodymap-toggle{align-self:flex-end;display:inline-flex;align-items:center;gap:8px;background:none;border:none;padding:4px 0;color:#334155;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}',
+    '.pm-bodymap-track{position:relative;flex-shrink:0;width:40px;height:22px;border-radius:999px;background:#94a3b8;transition:background 0.2s ease;}',
+    '.pm-bodymap-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.35);transition:transform 0.2s ease;}',
+    '.pm-bodymap-toggle[aria-checked="true"] .pm-bodymap-track{background:' + primaryColor + ';}',
+    '.pm-bodymap-toggle[aria-checked="true"] .pm-bodymap-thumb{transform:translateX(18px);}',
+    '.pm-bodymap-toggle:focus-visible{outline:none;}',
+    '.pm-bodymap-toggle:focus-visible .pm-bodymap-track{outline:2px solid ' + primaryColor + ';outline-offset:2px;}',
     '.pm-bodymap-stage{position:relative;overflow:hidden;border-radius:12px;background:radial-gradient(circle at 50% 45%,#fff5f5 0%,#fff 70%);}',
     '.pm-bodymap-zoom{transition:transform 0.45s ease;will-change:transform;}',
     '.pm-bodymap-svg{display:block;width:100%;height:auto;overflow:visible;}',
@@ -417,6 +430,6 @@ export function bodyMapStyles(primaryColor) {
     '.pm-bodymap-actions{display:flex;gap:8px;}',
     '.pm-bodymap-actions button{flex:1;}',
     '.pm-bodymap-back{background:#e2e8f0;color:#334155;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}',
-    '@media (prefers-reduced-motion:reduce){.pm-bodymap-zoom{transition:none;}.pm-bodymap-glow{animation:none;}}',
+    '@media (prefers-reduced-motion:reduce){.pm-bodymap-zoom,.pm-bodymap-track,.pm-bodymap-thumb{transition:none;}.pm-bodymap-glow{animation:none;}}',
   ].join('')
 }

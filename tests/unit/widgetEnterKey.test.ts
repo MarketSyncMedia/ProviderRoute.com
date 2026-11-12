@@ -95,7 +95,7 @@ describe('diagram or list on the case type question', () => {
     body.innerHTML = ''
     pm.renderCaseTypes(pm.data.questions.find((q) => q.question_type === 'entry')!)
     expect(stage().hidden).toBe(true)
-    expect((body.querySelector('.pm-bodymap-toggle') as HTMLElement).textContent).toBe('Switch to diagram view')
+    expect((body.querySelector('.pm-bodymap-toggle') as HTMLElement).getAttribute('aria-checked')).toBe('true')
 
     // And back again.
     ;(body.querySelector('.pm-bodymap-toggle') as HTMLButtonElement).click()
