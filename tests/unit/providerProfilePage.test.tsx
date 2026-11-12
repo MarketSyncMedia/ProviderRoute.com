@@ -74,7 +74,10 @@ vi.mock('../../src/lib/supabase', () => ({
           table === 'constraints'
             ? [{ id: 'c1', name: 'Accepts Medicare', type: 'binary', mapped_key: 'medicare', sort_order: 0 }]
             : table === 'locations'
-              ? [{ id: 'l1', name: 'Towson', sort_order: 0 }]
+              ? [
+                  { id: 'l1', name: 'Towson', sort_order: 0 },
+                  { id: 'l2', name: 'Rosedale', sort_order: 1 },
+                ]
               : [],
         error: null,
       }),
@@ -318,5 +321,139 @@ describe('ProviderProfilePage archiving the provider', () => {
         ]),
       ),
     )
+  })
+})
+
+describe('ProviderProfilePage booking links by mode', () => {
+  const link = (location_id: string, booking_link: string | null, phone: string | null = null) => ({
+    provider_id: 'p1',
+    location_id,
+    booking_link,
+    phone,
+  })
+
+  function setup({
+    orgBooking = 'simple',
+    orgPhone = 'simple',
+    provider = {},
+    rows = [link('l1', 'https://book.example/one'), link('l2', 'https://book.example/one')],
+  }: {
+    orgBooking?: string
+    orgPhone?: string
+    provider?: Partial<Provider>
+    rows?: ReturnType<typeof link>[]
+  } = {}) {
+    useAuthStore.setState({
+      org: { id: 'org1', name: 'Test Org', default_booking_mode: orgBooking, default_phone_mode: orgPhone } as never,
+      user: { id: 'u1', org_id: 'org1', name: 'Tester', email: 't@example.com' } as never,
+    })
+    providersApi.getProvider.mockResolvedValue(makeProvider(provider))
+    providersApi.updateProvider.mockResolvedValue({ error: null })
+    providerLocationsApi.upsertProviderLocation.mockResolvedValue({ error: null })
+    providerLocationsApi.getProviderLocations.mockResolvedValue(rows)
+    offeringsApi.getArchivedOfferingsByProvider.mockResolvedValue([])
+    offeringsApi.getOfferingsByProvider.mockResolvedValue([
+      { id: 'o1', provider_id: 'p1', org_id: 'org1', case_type_id: 'ct1', location_ids: ['l1', 'l2'], constraints: {}, is_archived: false },
+    ])
+  }
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it('gives simple mode one booking link and one phone, not a pair per location', async () => {
+    setup()
+    renderPage()
+
+    expect(await screen.findByLabelText('Booking link (all locations)')).toHaveValue('https://book.example/one')
+    expect(screen.getByLabelText('Phone (all locations)')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Booking link for Towson')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Phone for Rosedale')).not.toBeInTheDocument()
+    expect(screen.getByText('Used at Rosedale, Towson.')).toBeInTheDocument()
+  })
+
+  it('gives advanced mode a booking link and phone for each location', async () => {
+    setup({ orgBooking: 'advanced', orgPhone: 'advanced' })
+    renderPage()
+
+    expect(await screen.findByLabelText('Booking link for Towson')).toBeInTheDocument()
+    expect(screen.getByLabelText('Booking link for Rosedale')).toBeInTheDocument()
+    expect(screen.getByLabelText('Phone for Towson')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Booking link (all locations)')).not.toBeInTheDocument()
+  })
+
+  it('follows the provider’s own mode over the account default, one column at a time', async () => {
+    setup({ provider: { booking_mode: 'advanced' } })
+    renderPage()
+
+    expect(await screen.findByLabelText('Booking link for Towson')).toBeInTheDocument()
+    expect(screen.getByLabelText('Phone (all locations)')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Phone for Towson')).not.toBeInTheDocument()
+  })
+
+  it('saves the one link to every location', async () => {
+    setup()
+    renderPage()
+    const field = await screen.findByLabelText('Booking link (all locations)')
+
+    await userEvent.clear(field)
+    await userEvent.type(field, 'https://book.example/new')
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
+    expect(providerLocationsApi.upsertProviderLocation.mock.calls).toEqual([
+      ['p1', 'l2', 'https://book.example/new', null],
+      ['p1', 'l1', 'https://book.example/new', null],
+    ])
+  })
+
+  it('warns when the locations hold different links, and makes one the link for all on save', async () => {
+    setup({
+      orgBooking: 'advanced',
+      rows: [link('l1', 'https://book.example/towson'), link('l2', 'https://book.example/rosedale')],
+    })
+    renderPage()
+    await screen.findByLabelText('Booking link for Towson')
+    expect(screen.queryByText(/different links/)).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getAllByDisplayValue('Use org default')[0], 'simple')
+
+    // The widget uses the first location's link (by id), and so does this field.
+    expect(await screen.findByLabelText('Booking link (all locations)')).toHaveValue('https://book.example/towson')
+    expect(screen.getByText(/different links/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
+    expect(providerLocationsApi.upsertProviderLocation.mock.calls.map((c) => c[2])).toEqual([
+      'https://book.example/towson',
+      'https://book.example/towson',
+    ])
+    expect(providersApi.updateProvider).toHaveBeenCalledWith('p1', expect.objectContaining({ booking_mode: 'simple' }))
+  })
+
+  it('lets a provider switch mode on its own, without touching anything else', async () => {
+    setup({ orgBooking: 'advanced' })
+    renderPage()
+    await screen.findByLabelText('Booking link for Towson')
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
+
+    await userEvent.selectOptions(screen.getAllByDisplayValue('Use org default')[0], 'simple')
+
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled()
+  })
+
+  it('keeps each location’s own link when saving in advanced mode', async () => {
+    setup({
+      orgBooking: 'advanced',
+      orgPhone: 'advanced',
+      rows: [link('l1', 'https://book.example/towson'), link('l2', 'https://book.example/rosedale')],
+    })
+    renderPage()
+    const field = await screen.findByLabelText('Booking link for Rosedale')
+
+    await userEvent.type(field, '2')
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => expect(providerLocationsApi.upsertProviderLocation).toHaveBeenCalledTimes(2))
+    const saved = Object.fromEntries(providerLocationsApi.upsertProviderLocation.mock.calls.map((c) => [c[1], c[2]]))
+    expect(saved).toEqual({ l1: 'https://book.example/towson', l2: 'https://book.example/rosedale2' })
   })
 })

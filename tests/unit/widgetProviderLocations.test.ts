@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { liveProviderLocations } from '../../widget/src/providerLocations.js'
+import { liveProviderLocations, withSharedValues } from '../../widget/src/providerLocations.js'
 
 /**
  * A provider keeps their booking link and phone for a location after archiving
@@ -123,5 +123,47 @@ describe('the provider card', () => {
     expect(card.innerHTML).toContain('https://book.example/towson')
     expect(card.innerHTML).not.toContain('https://book.example/rosedale')
     expect(card.innerHTML).not.toContain('4105550200')
+  })
+})
+
+describe('withSharedValues', () => {
+  const rosedaleOther = { ...rosedale, booking_link: 'https://book.example/rosedale', phone: '4105550200' }
+  const bare = { provider_id: 'p1', location_id: 'zzz', booking_link: null, phone: null }
+
+  it('leaves each location its own link and phone in advanced mode', () => {
+    const rows = [towson, rosedaleOther]
+    expect(withSharedValues(rows, 'advanced', 'advanced')).toBe(rows)
+  })
+
+  it('offers the one shared link at every location in simple mode, even where rows disagree', () => {
+    const [a, b] = withSharedValues([towson, rosedaleOther], 'simple', 'advanced')
+    // Locations are taken in id order, so rosedale is first.
+    expect(a.booking_link).toBe('https://book.example/rosedale')
+    expect(b.booking_link).toBe('https://book.example/rosedale')
+    // The phone column is advanced, so each keeps its own.
+    expect([a.phone, b.phone]).toEqual(['4105550100', '4105550200'])
+  })
+
+  it('shares the phone the same way, independently of the link', () => {
+    const [a, b] = withSharedValues([towson, rosedaleOther], 'advanced', 'simple')
+    expect([a.phone, b.phone]).toEqual(['4105550200', '4105550200'])
+    expect([a.booking_link, b.booking_link]).toEqual(['https://book.example/towson', 'https://book.example/rosedale'])
+  })
+
+  it('gives a location with nothing saved the shared link too', () => {
+    const rows = withSharedValues([towson, bare], 'simple', 'simple')
+    expect(rows.map((r) => r.booking_link)).toEqual(['https://book.example/towson', 'https://book.example/towson'])
+    expect(rows.map((r) => r.phone)).toEqual(['4105550100', '4105550100'])
+  })
+
+  it('has no link at all when none is saved anywhere, rather than an empty string', () => {
+    expect(withSharedValues([bare], 'simple', 'simple')[0]).toMatchObject({ booking_link: null, phone: null })
+  })
+
+  it('does not change the rows it is given', () => {
+    const rows = [towson, rosedaleOther]
+    withSharedValues(rows, 'simple', 'simple')
+    expect(towson.booking_link).toBe('https://book.example/towson')
+    expect(rows[1]).toBe(rosedaleOther)
   })
 })

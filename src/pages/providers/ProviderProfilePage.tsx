@@ -53,7 +53,8 @@ import type {
   Offering,
   ProviderLocation,
 } from '../../types/database'
-import { asProviderMode, asRecord, toJson } from '../../lib/schemaEnums'
+import { asOrgMode, asProviderMode, asRecord, toJson } from '../../lib/schemaEnums'
+import { locationValuesDisagree, sharedLocationValue } from '../../shared/sharedLocationValue'
 
 // Stable singleton, not a fresh `[]` literal — a per-render default would
 // change identity every render, which is exactly the bug that used to make
@@ -78,6 +79,8 @@ function sameIds(a: string[], b: string[]) {
 export default function ProviderProfilePage() {
   const { id } = useParams<{ id: string }>()
   const orgId = useAuthStore((s) => s.org?.id ?? '')
+  const orgBookingMode = useAuthStore((s) => asOrgMode(s.org?.default_booking_mode))
+  const orgPhoneMode = useAuthStore((s) => asOrgMode(s.org?.default_phone_mode))
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -317,8 +320,35 @@ export default function ProviderProfilePage() {
     })
   }, [offeringLocationIds, phoneLinks, phoneLinkBaselineByLocationId])
 
+  // What the provider actually uses: their own choice, or the account's default.
+  const effectiveBookingMode = bookingMode === 'default' ? orgBookingMode : bookingMode
+  const effectivePhoneMode = phoneMode === 'default' ? orgPhoneMode : phoneMode
+  const bookingSimple = effectiveBookingMode === 'simple'
+  const phoneSimple = effectivePhoneMode === 'simple'
+
+  // In simple mode there is one link / one number for every location. They are
+  // still stored per location, so the one shown is the one the widget uses
+  // (see sharedLocationValue), and editing it sets every location.
+  const bookingEntries = offeringLocationIds.map((locationId) => ({ locationId, value: bookingLinks[locationId] }))
+  const phoneEntries = offeringLocationIds.map((locationId) => ({ locationId, value: phoneLinks[locationId] }))
+  const sharedBooking = sharedLocationValue(bookingEntries)
+  const sharedPhone = sharedLocationValue(phoneEntries)
+  const bookingDisagrees = bookingSimple && locationValuesDisagree(bookingEntries)
+  const phoneDisagrees = phoneSimple && locationValuesDisagree(phoneEntries)
+
+  /** Simple mode: one value, stored at every location the provider covers. */
+  function setAllLocations(set: typeof setBookingLinks, value: string) {
+    set((prev) => ({ ...prev, ...Object.fromEntries(offeringLocationIds.map((locationId) => [locationId, value])) }))
+  }
+
+  const hasModeChanges =
+    provider !== undefined &&
+    provider !== null &&
+    (bookingMode !== asProviderMode(provider.booking_mode) || phoneMode !== asProviderMode(provider.phone_mode))
+
   const hasCategoryChanges = !sameIds(categoryIds, originalCategoryIds)
-  const canSave = formState.isDirty || hasCategoryChanges || hasBookingLinkChanges || hasPhoneLinkChanges
+  const canSave =
+    formState.isDirty || hasCategoryChanges || hasBookingLinkChanges || hasPhoneLinkChanges || hasModeChanges
 
   const providerName = provider?.name ?? ''
   const initials = initialsForName(providerName)
@@ -346,8 +376,9 @@ export default function ProviderProfilePage() {
     }
 
     for (const locationId of offeringLocationIds) {
-      const link = bookingLinks[locationId]?.trim() ?? ''
-      const phone = formatPhone(phoneLinks[locationId])
+      // Simple mode saves the one value to every location.
+      const link = bookingSimple ? sharedBooking : (bookingLinks[locationId]?.trim() ?? '')
+      const phone = phoneSimple ? formatPhone(sharedPhone) : formatPhone(phoneLinks[locationId])
       const saveResult = await upsertProviderLocation(id, locationId, link || null, phone || null)
       if (saveResult.error) {
         toast.error(saveResult.error)
@@ -717,51 +748,116 @@ export default function ProviderProfilePage() {
           </div>
         ) : (
           <div className="w-full">
-            <div className="flex items-center gap-4 border-b border-slate-200 pb-2 text-xs uppercase tracking-wider text-slate-500">
-              <div className="w-1/4">Location</div>
-              <div className="flex-1">Booking Link</div>
-              <div className="flex-1">Phone</div>
-            </div>
-
-            {offeringLocationIds.map((locationId, index) => {
-              const locationName = locationNameById.get(locationId) ?? 'Unknown location'
-
-              return (
-                <div
-                  key={locationId}
-                  className={[
-                    'flex items-center gap-4 py-3',
-                    index === offeringLocationIds.length - 1 ? '' : 'border-b border-slate-100',
-                  ].join(' ')}
-                >
-                  <div className="w-1/4">
-                    <span className="text-sm text-slate-700">{locationName}</span>
-                  </div>
+            {bookingSimple || phoneSimple ? (
+              <div className="mb-4 flex flex-col gap-4 sm:flex-row">
+                {bookingSimple ? (
                   <div className="flex-1">
+                    <label
+                      htmlFor="shared-booking-link"
+                      className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500"
+                    >
+                      Booking link (all locations)
+                    </label>
                     <input
+                      id="shared-booking-link"
                       type="text"
-                      value={bookingLinks[locationId] ?? ''}
-                      onChange={(event) =>
-                        setBookingLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
-                      }
+                      value={sharedBooking}
+                      onChange={(event) => setAllLocations(setBookingLinks, event.target.value)}
                       placeholder="https://..."
                       className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
                     />
+                    {bookingDisagrees ? (
+                      <p className="mt-1 text-xs text-amber-700">
+                        The locations currently have different links. Saving uses this one for all of them.
+                      </p>
+                    ) : null}
                   </div>
+                ) : null}
+                {phoneSimple ? (
                   <div className="flex-1">
+                    <label
+                      htmlFor="shared-phone"
+                      className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500"
+                    >
+                      Phone (all locations)
+                    </label>
                     <input
+                      id="shared-phone"
                       type="text"
-                      value={phoneLinks[locationId] ?? ''}
-                      onChange={(event) =>
-                        setPhoneLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
-                      }
+                      value={sharedPhone}
+                      onChange={(event) => setAllLocations(setPhoneLinks, event.target.value)}
                       placeholder="(410) 555-0123"
                       className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
                     />
+                    {phoneDisagrees ? (
+                      <p className="mt-1 text-xs text-amber-700">
+                        The locations currently have different numbers. Saving uses this one for all of them.
+                      </p>
+                    ) : null}
                   </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {bookingSimple && phoneSimple ? (
+              <p className="text-xs text-slate-500">
+                Used at {offeringLocationIds.map((locationId) => locationNameById.get(locationId)).join(', ')}.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center gap-4 border-b border-slate-200 pb-2 text-xs uppercase tracking-wider text-slate-500">
+                  <div className="w-1/4">Location</div>
+                  {bookingSimple ? null : <div className="flex-1">Booking Link</div>}
+                  {phoneSimple ? null : <div className="flex-1">Phone</div>}
                 </div>
-              )
-            })}
+
+                {offeringLocationIds.map((locationId, index) => {
+                  const locationName = locationNameById.get(locationId) ?? 'Unknown location'
+
+                  return (
+                    <div
+                      key={locationId}
+                      className={[
+                        'flex items-center gap-4 py-3',
+                        index === offeringLocationIds.length - 1 ? '' : 'border-b border-slate-100',
+                      ].join(' ')}
+                    >
+                      <div className="w-1/4">
+                        <span className="text-sm text-slate-700">{locationName}</span>
+                      </div>
+                      {bookingSimple ? null : (
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            aria-label={`Booking link for ${locationName}`}
+                            value={bookingLinks[locationId] ?? ''}
+                            onChange={(event) =>
+                              setBookingLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
+                            }
+                            placeholder="https://..."
+                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                          />
+                        </div>
+                      )}
+                      {phoneSimple ? null : (
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            aria-label={`Phone for ${locationName}`}
+                            value={phoneLinks[locationId] ?? ''}
+                            onChange={(event) =>
+                              setPhoneLinks((prev) => ({ ...prev, [locationId]: event.target.value }))
+                            }
+                            placeholder="(410) 555-0123"
+                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </>
+            )}
           </div>
         )}
       </div>
