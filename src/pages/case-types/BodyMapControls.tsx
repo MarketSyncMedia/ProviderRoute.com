@@ -36,11 +36,11 @@ export function MapSpotBadge({ caseType }: { caseType: CaseType }) {
   if (!spot) return null
   return (
     <span
-      title={spot.custom ? 'On the body map' : `On the body map at ${spot.label}`}
+      title={spot.custom ? 'On the body map' : `On the body map, at the standard ${spot.label} spot`}
       className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
     >
       <MapPin className="h-3 w-3" />
-      {spot.custom ? 'Body map' : spot.label}
+      Body map
     </span>
   )
 }

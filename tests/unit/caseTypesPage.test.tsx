@@ -248,10 +248,16 @@ describe('CaseTypesPage body map section', () => {
     expect(screen.queryByText(/placed by you/i)).not.toBeInTheDocument()
   })
 
-  it('marks linked rows in the list', async () => {
-    api.getCaseTypes.mockResolvedValue([caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' })])
+  it('marks every case type on the map the same way in the list, standard spot or placed', async () => {
+    api.getCaseTypes.mockResolvedValue([
+      caseType({ id: 'ct1', name: 'Knee Pain', map_tag: 'knee' }),
+      caseType({ id: 'pec', name: 'Pectoral', sort_order: 1, map_view: 'front', map_x: 45, map_y: 27 } as Partial<CaseType>),
+      caseType({ id: 'ct2', name: 'Shoulder Pain', sort_order: 2 }),
+    ])
     renderPage()
-    expect(within(await row('Knee Pain')).getByText('Knee')).toBeInTheDocument()
+    expect(within(await row('Knee Pain')).getByText('Body map')).toBeInTheDocument()
+    expect(within(await row('Pectoral')).getByText('Body map')).toBeInTheDocument()
+    expect(within(await row('Shoulder Pain')).queryByText('Body map')).not.toBeInTheDocument()
   })
 
   it('never shows a case type that was archived, even one that kept its spot', async () => {
