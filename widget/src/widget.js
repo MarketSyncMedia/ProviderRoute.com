@@ -26,6 +26,19 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
   var supabaseAnonKey =
     typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : ''
 
+  /**
+   * Makes Enter in a field press its Next button, as it would in a form. These
+   * fields sit in plain containers, not a <form>, so the browser does nothing
+   * with Enter on its own.
+   */
+  function submitOnEnter(field, button) {
+    field.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' || e.isComposing) return
+      e.preventDefault()
+      button.click()
+    })
+  }
+
   function generateUUID() {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID()
@@ -750,7 +763,13 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       var body = this.shadow.getElementById('pm-body')
       // Orgs that linked case types to body map spots get the map; everyone
       // else gets the list exactly as before.
-      var map = buildBodyMap(document, caseTypes, select)
+      // The diagram/list choice survives the Back button redrawing the map.
+      var map = buildBodyMap(document, caseTypes, select, {
+        listView: Boolean(self.state.caseTypeListView),
+        onViewChange: function (listView) {
+          self.state.caseTypeListView = listView
+        },
+      })
       if (map) {
         if (body) body.appendChild(map)
         return
@@ -808,6 +827,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         })
         self.handleAnswer(q, sel.value, loc ? loc.name : sel.value)
       }
+      submitOnEnter(sel, btn)
       wrap.appendChild(sel)
       wrap.appendChild(btn)
       var body = this.shadow.getElementById('pm-body')
@@ -885,6 +905,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         self.state.activeOfferings = filterRange(self.state.activeOfferings, constraint, val)
         self.handleAnswer(q, val, String(val))
       }
+      submitOnEnter(inp, btn)
       wrap.appendChild(inp)
       wrap.appendChild(btn)
       var body = this.shadow.getElementById('pm-body')
@@ -912,6 +933,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             self.state.activeOfferings = filterExact(self.state.activeOfferings, constraint, t)
             self.handleAnswer(q, t, t)
           }
+          submitOnEnter(inp, btn)
           wrap.appendChild(inp)
           wrap.appendChild(btn)
         } else {
@@ -937,6 +959,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             )
             self.handleAnswer(q, sel.value, sel.value)
           }
+          submitOnEnter(sel, btn2)
           wrap.appendChild(sel)
           wrap.appendChild(btn2)
         }

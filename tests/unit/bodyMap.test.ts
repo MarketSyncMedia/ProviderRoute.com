@@ -32,6 +32,21 @@ describe('body map spots', () => {
   })
 })
 
+describe('balance between the two figures', () => {
+  const onView = (view: string) => BODY_MAP_SPOTS.filter((s) => s.view === view).map((s) => s.tag)
+
+  it('keeps Elbow, Hand and Hip on the back, so the front is not crowded', () => {
+    expect(onView('back')).toEqual(expect.arrayContaining(['elbow', 'hand', 'hip']))
+    expect(onView('front')).not.toContain('elbow')
+    expect(onView('front')).not.toContain('hand')
+    expect(onView('front')).not.toContain('hip')
+  })
+
+  it('does not leave the front with more than twice the back', () => {
+    expect(onView('front').length).toBeLessThanOrEqual(2 * onView('back').length)
+  })
+})
+
 describe('spotsMatchingName', () => {
   it('matches whole words regardless of case and punctuation', () => {
     expect(spotsMatchingName('Knee Pain').map((s) => s.tag)).toEqual(['knee'])

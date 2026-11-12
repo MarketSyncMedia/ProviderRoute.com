@@ -130,14 +130,26 @@ function buildCallout(doc, spot, p) {
  * @param {Document} doc
  * @param {Array<{id: string, name: string, map_tag?: string | null}>} caseTypes
  * @param {(caseType: object) => void} onSelect
+ * @param {{ listView?: boolean, onViewChange?: (listView: boolean) => void }} [options]
+ *   `listView` starts the map showing the plain list instead of the diagram;
+ *   `onViewChange` hears each flip, so the caller can keep the choice when it
+ *   redraws the map (the Back button does).
  * @returns {HTMLElement | null}
  */
-export function buildBodyMap(doc, caseTypes, onSelect) {
+export function buildBodyMap(doc, caseTypes, onSelect, options) {
   var parts = partitionCaseTypes(caseTypes)
   if (parts.placed.length === 0) return null
+  options = options || {}
 
   var root = doc.createElement('div')
   root.className = 'pm-bodymap'
+
+  // The switch between the diagram and a plain list of every case type, for
+  // anyone who would rather read than find their spot on a figure.
+  var toggle = doc.createElement('button')
+  toggle.type = 'button'
+  toggle.className = 'pm-bodymap-toggle'
+  root.appendChild(toggle)
 
   var stage = doc.createElement('div')
   stage.className = 'pm-bodymap-stage'
@@ -219,10 +231,21 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
     if (refocus && refocus.focus) refocus.focus()
   }
 
-  backBtn.onclick = zoomOut
-  continueBtn.onclick = function () {
+  function confirmChoice() {
     if (chosen) onSelect(chosen.caseType)
   }
+
+  backBtn.onclick = zoomOut
+  continueBtn.onclick = confirmChoice
+
+  // Enter confirms the zoomed-in spot, like pressing Continue -- wherever
+  // focus is inside the map (Back keeps its own Enter, which goes back).
+  root.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || !chosen || e.isComposing) return
+    if (e.target === backBtn || e.target === toggle) return
+    e.preventDefault()
+    confirmChoice()
+  })
 
   // Labels and their lines go in a layer under the dots, so where a line or
   // label's tap area crosses a neighbouring dot, the dot wins.
@@ -283,6 +306,9 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
       if (chosen) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
+        // Stop here: the map's own Enter handler would otherwise see the spot
+        // just chosen and confirm it in the same keystroke.
+        e.stopPropagation()
         zoomTo(entry, g)
       }
     })
@@ -290,8 +316,9 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
     dotLayer.appendChild(g)
   })
 
+  var other = null
   if (parts.unplaced.length > 0) {
-    var other = doc.createElement('div')
+    other = doc.createElement('div')
     other.className = 'pm-bodymap-other'
     var title = doc.createElement('div')
     title.className = 'pm-section-title'
@@ -313,6 +340,37 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
     root.appendChild(other)
   }
 
+  // The list view: every case type, placed or not, in the order given.
+  var fullList = doc.createElement('div')
+  fullList.className = 'pm-options pm-bodymap-list'
+  ;(caseTypes || []).forEach(function (ct) {
+    var btn = doc.createElement('button')
+    btn.type = 'button'
+    btn.className = 'pm-option'
+    btn.textContent = ct.name
+    btn.onclick = function () {
+      onSelect(ct)
+    }
+    fullList.appendChild(btn)
+  })
+  root.appendChild(fullList)
+
+  var listView = false
+  function showView(next) {
+    listView = next
+    if (listView && chosen) zoomOut()
+    root.classList.toggle('pm-bodymap-list-view', listView)
+    stage.hidden = listView
+    fullList.hidden = !listView
+    if (other) other.hidden = listView
+    toggle.textContent = listView ? 'Switch to diagram view' : 'Switch to list view'
+  }
+  toggle.onclick = function () {
+    showView(!listView)
+    if (options.onViewChange) options.onViewChange(listView)
+  }
+  showView(Boolean(options.listView))
+
   return root
 }
 
@@ -320,6 +378,11 @@ export function buildBodyMap(doc, caseTypes, onSelect) {
 export function bodyMapStyles(primaryColor) {
   return [
     '.pm-bodymap{display:flex;flex-direction:column;gap:10px;}',
+    // The class rules below set display, which would beat the hidden attribute.
+    '.pm-bodymap [hidden]{display:none !important;}',
+    '.pm-bodymap-toggle{align-self:flex-end;background:#fff;color:#334155;border:1px solid #cbd5e1;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}',
+    '.pm-bodymap-toggle:hover{border-color:' + primaryColor + ';color:' + primaryColor + ';}',
+    '.pm-bodymap-toggle:focus-visible{outline:2px solid ' + primaryColor + ';outline-offset:2px;}',
     '.pm-bodymap-stage{position:relative;overflow:hidden;border-radius:12px;background:radial-gradient(circle at 50% 45%,#fff5f5 0%,#fff 70%);}',
     '.pm-bodymap-zoom{transition:transform 0.45s ease;will-change:transform;}',
     '.pm-bodymap-svg{display:block;width:100%;height:auto;overflow:visible;}',

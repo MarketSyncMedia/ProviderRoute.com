@@ -185,6 +185,117 @@ describe('buildBodyMap', () => {
   })
 })
 
+describe('list view', () => {
+  const toggle = () => map.querySelector('.pm-bodymap-toggle') as HTMLButtonElement
+  const stage = () => map.querySelector('.pm-bodymap-stage') as HTMLElement
+  const list = () => map.querySelector('.pm-bodymap-list') as HTMLElement
+  const other = () => map.querySelector('.pm-bodymap-other') as HTMLElement
+
+  it('starts on the diagram, offering to switch to the list', () => {
+    expect(toggle().textContent).toBe('Switch to list view')
+    expect(stage().hidden).toBe(false)
+    expect(list().hidden).toBe(true)
+  })
+
+  it('shows every case type as a button, spotted or not, and hides the diagram', () => {
+    toggle().click()
+    expect(stage().hidden).toBe(true)
+    expect(list().hidden).toBe(false)
+    expect(other().hidden).toBe(true)
+    const names = Array.from(list().querySelectorAll('button')).map((b) => b.textContent)
+    expect(names).toEqual(['Knee', 'Neck Pain', 'General Orthopedics'])
+  })
+
+  it('selects a case type straight from the list', () => {
+    toggle().click()
+    ;(list().querySelectorAll('button')[1] as HTMLButtonElement).click()
+    expect(onSelect).toHaveBeenCalledWith(caseTypes[1])
+  })
+
+  it('flips back to the diagram, as often as they like', () => {
+    toggle().click()
+    expect(toggle().textContent).toBe('Switch to diagram view')
+    toggle().click()
+    expect(toggle().textContent).toBe('Switch to list view')
+    expect(stage().hidden).toBe(false)
+    expect(list().hidden).toBe(true)
+    expect(other().hidden).toBe(false)
+
+    toggle().click()
+    toggle().click()
+    spot('knee').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(map.classList.contains('pm-bodymap-zoomed')).toBe(true)
+  })
+
+  it('leaves a zoomed-in spot when switching to the list, so the diagram is fresh on return', () => {
+    spot('knee').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    toggle().click()
+    expect(map.classList.contains('pm-bodymap-zoomed')).toBe(false)
+    expect(confirmPanel().hidden).toBe(true)
+    toggle().click()
+    expect(map.classList.contains('pm-bodymap-zoomed')).toBe(false)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('can start on the list, and reports each flip so a redraw can keep the choice', () => {
+    const onViewChange = vi.fn()
+    const redrawn = buildBodyMap(document, caseTypes, onSelect, { listView: true, onViewChange }) as HTMLElement
+    const t = redrawn.querySelector('.pm-bodymap-toggle') as HTMLButtonElement
+    expect(t.textContent).toBe('Switch to diagram view')
+    expect((redrawn.querySelector('.pm-bodymap-stage') as HTMLElement).hidden).toBe(true)
+
+    t.click()
+    expect(onViewChange).toHaveBeenLastCalledWith(false)
+    t.click()
+    expect(onViewChange).toHaveBeenLastCalledWith(true)
+  })
+
+  it('keeps hidden parts hidden even though their classes set display', () => {
+    expect(bodyMapStyles('#000')).toContain('.pm-bodymap [hidden]{display:none !important;}')
+  })
+})
+
+describe('Enter key', () => {
+  const enter = (target: Element) => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    target.dispatchEvent(event)
+    return event
+  }
+
+  it('confirms the zoomed-in spot, like Continue', () => {
+    spot('neck').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    enter(button(/Continue/))
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith(caseTypes[1])
+  })
+
+  it('confirms from anywhere in the map while zoomed, not only from the Continue button', () => {
+    spot('neck').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    enter(map.querySelector('.pm-bodymap-heading')!)
+    expect(onSelect).toHaveBeenCalledWith(caseTypes[1])
+  })
+
+  it('does not confirm in the same keystroke that opens a spot', () => {
+    enter(spot('knee'))
+    expect(map.classList.contains('pm-bodymap-zoomed')).toBe(true)
+    expect(onSelect).not.toHaveBeenCalled()
+    // The next Enter is the confirmation.
+    enter(button(/Continue/))
+    expect(onSelect).toHaveBeenCalledWith(caseTypes[0])
+  })
+
+  it('leaves Back to go back', () => {
+    spot('knee').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    enter(button(/Back/))
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when no spot is zoomed in on', () => {
+    enter(map.querySelector('svg')!)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+})
+
 describe('spots the admin placed', () => {
   const placed = {
     id: 'pec',
