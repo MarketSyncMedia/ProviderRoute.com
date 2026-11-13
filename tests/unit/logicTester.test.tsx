@@ -201,3 +201,60 @@ describe('LogicTester flow', () => {
     expect(screen.getAllByText(/Session started/)).toHaveLength(1)
   })
 })
+
+describe('Enter key in the tester, as in the widget', () => {
+  const ageConstraint: Constraint = {
+    ...orphanConstraint,
+    id: 'c-age',
+    name: 'Age Range',
+    type: 'range',
+    mapped_key: 'min_age',
+    secondary_mapped_key: 'max_age',
+  }
+
+  beforeEach(() => {
+    api.getQuestions.mockResolvedValue([
+      question({ id: 'q-entry', question_type: 'entry', question_text: 'What brings you in?', order_rank: 0 }),
+      question({ id: 'q-age', constraint_id: 'c-age', question_text: 'How old is the patient?', order_rank: 1 }),
+    ])
+    api.getConstraints.mockResolvedValue([ageConstraint])
+    api.getDataTableOfferings.mockResolvedValue([
+      {
+        id: 'o1',
+        provider_id: 'p1',
+        case_type_id: 'ct1',
+        org_id: 'org1',
+        location_ids: [],
+        constraints: { min_age: 0, max_age: 99 },
+        is_archived: false,
+        created_at: '',
+        updated_at: '',
+        providers: { name: 'Dr. Ada Reyes', category_ids: [], image_url: null },
+      },
+    ])
+  })
+
+  it('submits a typed number, like pressing Next', async () => {
+    const user = userEvent.setup()
+    renderTester()
+    await screen.findByText('What brings you in?')
+    await user.click(screen.getByRole('button', { name: 'Knee Pain' }))
+
+    await user.type(await screen.findByPlaceholderText('Enter a number'), '45{Enter}')
+
+    await waitFor(() => expect(screen.getByText(/Question flow complete/)).toBeInTheDocument())
+    expect(screen.getByText(/Filter applied: Age Range/)).toBeInTheDocument()
+  })
+
+  it('does nothing on Enter in an empty number field, like Next', async () => {
+    const user = userEvent.setup()
+    renderTester()
+    await screen.findByText('What brings you in?')
+    await user.click(screen.getByRole('button', { name: 'Knee Pain' }))
+
+    await user.type(await screen.findByPlaceholderText('Enter a number'), '{Enter}')
+
+    expect(screen.getByText('How old is the patient?')).toBeInTheDocument()
+    expect(screen.queryByText(/Question flow complete/)).not.toBeInTheDocument()
+  })
+})
