@@ -19,10 +19,12 @@ type WidgetApi = {
 
 const payload = {
   config: { allowed_domains: ['localhost'], embed_mode: 'floating', primary_color: '#4F46E5' },
-  offerings: [{ id: 'o1', provider_id: 'p1', case_type_id: 'knee', location_ids: ['towson'], min_age: 0, max_age: 99 }],
+  offerings: [{ id: 'o1', provider_id: 'p1', case_type_id: 'knee', location_ids: ['towson'], constraints: { min_age: 0, max_age: 99 } }],
+  constraints: [{ id: 'c-age', type: 'range', mapped_key: 'min_age', secondary_mapped_key: 'max_age' }],
   questions: [
     { id: 'q-loc', question_type: 'location', question_text: 'Where?', order_rank: 1, required: true, system_config: {} },
     { id: 'q-entry', question_type: 'entry', question_text: 'What hurts?', order_rank: 0, required: true },
+    { id: 'q-age', question_type: 'clinical', constraint_id: 'c-age', question_text: 'How old?', order_rank: 2, required: true },
   ],
   caseTypes: [
     { id: 'knee', name: 'Knee', map_tag: 'knee' },
@@ -79,6 +81,29 @@ describe('Enter in a question field', () => {
     select.value = 'towson'
     enter(select)
     expect(pm.state.answers['q-loc']).toBe('towson')
+  })
+})
+
+describe('Enter in the number box', () => {
+  it('ignores an empty box, like Next, rather than answering 0', async () => {
+    const pm = await boot()
+    const body = pm.shadow!.getElementById('pm-body')!
+    ;(body.querySelector('.pm-bodymap-toggle') as HTMLButtonElement).click()
+    ;(body.querySelector('.pm-bodymap-list button') as HTMLButtonElement).click()
+    await vi.advanceTimersByTimeAsync(400)
+    const select = body.querySelector('select.pm-select') as HTMLSelectElement
+    select.value = 'towson'
+    enter(select)
+    await vi.advanceTimersByTimeAsync(400)
+
+    const input = body.querySelector('input.pm-number-input') as HTMLInputElement
+    expect(input).not.toBeNull()
+    enter(input)
+    expect(pm.state.answers['q-age']).toBeUndefined()
+
+    input.value = '45'
+    enter(input)
+    expect(pm.state.answers['q-age']).toBe(45)
   })
 })
 

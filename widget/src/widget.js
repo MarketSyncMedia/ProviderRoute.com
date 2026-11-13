@@ -900,8 +900,10 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       btn.className = 'pm-next-btn'
       btn.textContent = 'Next'
       btn.onclick = function () {
+        // An empty box is no answer; Number('') would read it as 0 and could
+        // send the patient to "no providers found".
         var val = Number(inp.value)
-        if (isNaN(val)) return
+        if (inp.value.trim() === '' || isNaN(val)) return
         self.state.activeOfferings = filterRange(self.state.activeOfferings, constraint, val)
         self.handleAnswer(q, val, String(val))
       }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { RotateCcw, X } from 'lucide-react'
 import { getCaseTypes } from '../../lib/api/caseTypes'
@@ -20,6 +20,15 @@ import type { CaseType, Constraint, Location, Offering, Provider } from '../../t
 
 export type OfferingRow = Offering & {
   providers?: { name: string; category_ids: string[]; image_url: string | null }
+}
+
+/** Makes Enter in a field do what its Next button does, as the real widget does. */
+function enterTo(action: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    action()
+  }
 }
 
 type Phase = 'questions' | 'zero_results' | 'results'
@@ -458,8 +467,9 @@ export default function LogicTester({ onClose, orgId }: LogicTesterProps) {
   }
 
   const answerClinicalRange = () => {
+    // An empty box is no answer; Number('') would read it as 0.
     const n = Number(rangeInput)
-    if (!Number.isFinite(n)) {
+    if (rangeInput.trim() === '' || !Number.isFinite(n)) {
       return
     }
     if (!currentQuestion?.constraint_id) {
@@ -585,6 +595,9 @@ export default function LogicTester({ onClose, orgId }: LogicTesterProps) {
           className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
           value={selectedLocationId ?? ''}
           onChange={(e) => setSelectedLocationId(e.target.value)}
+          onKeyDown={enterTo(() => {
+            if (selectedLocationId) answerLocation(selectedLocationId)
+          })}
         >
           <option value="">Select location…</option>
           {bundle.locations.map((loc: Location) => (
@@ -649,6 +662,7 @@ export default function LogicTester({ onClose, orgId }: LogicTesterProps) {
               type="number"
               value={rangeInput}
               onChange={(e) => setRangeInput(e.target.value)}
+              onKeyDown={enterTo(answerClinicalRange)}
               className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
               placeholder="Enter a number"
             />
@@ -672,6 +686,7 @@ export default function LogicTester({ onClose, orgId }: LogicTesterProps) {
                   type="text"
                   value={exactInput}
                   onChange={(e) => setExactInput(e.target.value)}
+                  onKeyDown={enterTo(answerClinicalExact)}
                   className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   placeholder="Answer"
                 />
@@ -727,6 +742,7 @@ export default function LogicTester({ onClose, orgId }: LogicTesterProps) {
               type="text"
               value={exactInput}
               onChange={(e) => setExactInput(e.target.value)}
+              onKeyDown={enterTo(answerClinicalExact)}
               className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm"
               placeholder="Answer"
             />
