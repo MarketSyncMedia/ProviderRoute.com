@@ -119,12 +119,26 @@ describe('the result card\'s appointment request and self-scheduling buttons', (
     expect(links(card)).toEqual([['Schedule Online', 'https://cal.example/dr']])
   })
 
-  it('names the location the patient chose, unless the admin wrote their own wording', () => {
+  it('keeps the generic wording in simple mode even when the patient chose a location', () => {
     const chosen = render({ selectedLocationId: 'towson' })
+    expect(links(chosen).map((l) => l[0])).toEqual(['Book Now', 'Schedule Online'])
+  })
+
+  it('names the location in advanced mode, unless the admin wrote their own wording', () => {
+    const advanced = { default_booking_mode: 'advanced', default_self_schedule_mode: 'advanced' }
+    const chosen = render({ selectedLocationId: 'towson', config: advanced })
     expect(links(chosen).map((l) => l[0])).toEqual(['Book at Towson', 'Schedule at Towson'])
 
-    const custom = render({ selectedLocationId: 'towson', config: { booking_button_text: 'Request an Appt' } })
+    const custom = render({ selectedLocationId: 'towson', config: { ...advanced, booking_button_text: 'Request an Appt' } })
     expect(links(custom).map((l) => l[0])).toEqual(['Request an Appt', 'Schedule at Towson'])
+  })
+
+  it('says "Book Now" in simple mode and "Book at <location>" in advanced for a provider with one location', () => {
+    const oneLocation = [row('towson', 'https://book.example/dr', null)]
+    expect(links(render({ rows: oneLocation }))).toEqual([['Book Now', 'https://book.example/dr']])
+    expect(links(render({ rows: oneLocation, config: { default_booking_mode: 'advanced' } }))).toEqual([
+      ['Book at Towson', 'https://book.example/dr'],
+    ])
   })
 
   it('follows each link\'s own mode: advanced self-scheduling lets the patient choose a location', () => {
@@ -191,5 +205,23 @@ describe('the result card\'s appointment request and self-scheduling buttons', (
     })
     expect(card.querySelectorAll('a.pm-call')).toHaveLength(1)
     expect(links(card)).toHaveLength(2)
+  })
+
+  describe('call button wording follows the phone mode', () => {
+    const callText = (card: Card) => Array.from(card.querySelectorAll('a.pm-call')).map((a) => a.textContent)
+    const oneLocation = [row('towson', null, null, '4105550100')]
+    const twoLocations = [row('towson', null, null, '4105550100'), row('rosedale', null, null, '4105550100')]
+
+    it('says "Call Office" in simple mode: one location, several, or a location the patient chose', () => {
+      expect(callText(render({ rows: oneLocation }))).toEqual(['📞 Call Office'])
+      expect(callText(render({ rows: twoLocations }))).toEqual(['📞 Call Office'])
+      expect(callText(render({ rows: twoLocations, selectedLocationId: 'towson' }))).toEqual(['📞 Call Office'])
+    })
+
+    it('names the location in advanced mode, even for a provider with only one', () => {
+      const advanced = { default_phone_mode: 'advanced' }
+      expect(callText(render({ rows: oneLocation, config: advanced }))).toEqual(['📞 Call Towson'])
+      expect(callText(render({ rows: twoLocations, config: advanced, selectedLocationId: 'rosedale' }))).toEqual(['📞 Call Rosedale'])
+    })
   })
 })
