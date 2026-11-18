@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BOOKING_WORDS,
   SELF_SCHEDULE_WORDS,
+  callButtonLabel,
   linkButtonLabel,
   linkSlideHeader,
   planLinkAction,
@@ -50,6 +51,16 @@ describe('planLinkAction', () => {
       url: 'https://book.example/towson',
       atLocation: true,
     })
+  })
+
+  it('never names a location in simple mode, even when the patient picked one or there is only one', () => {
+    const shared = withSharedValues([towson, rosedale], 'simple', 'advanced', 'simple')
+    expect(planLinkAction(shared, 'booking_link', 'simple', 'towson')).toMatchObject({ type: 'link', atLocation: false })
+    expect(planLinkAction([towson], 'booking_link', 'simple', null)).toMatchObject({ type: 'link', atLocation: false })
+  })
+
+  it('always names the location in advanced mode, even for a provider with only one', () => {
+    expect(planLinkAction([towson], 'booking_link', 'advanced', null)).toMatchObject({ type: 'link', atLocation: true })
   })
 
   it('offers the one shared link directly in simple mode, without naming a location', () => {
@@ -120,6 +131,18 @@ describe('linkButtonLabel', () => {
   it('has built-in self-scheduling wording of its own', () => {
     expect(linkButtonLabel(null, SELF_SCHEDULE_WORDS, true, 'Towson')).toBe('Schedule at Towson')
     expect(linkButtonLabel(null, SELF_SCHEDULE_WORDS, false)).toBe('Schedule Online')
+  })
+})
+
+describe('callButtonLabel', () => {
+  it('is one generic button in simple mode, whatever the location', () => {
+    expect(callButtonLabel('simple', 'Towson')).toBe('📞 Call Office')
+    expect(callButtonLabel('simple', null)).toBe('📞 Call Office')
+  })
+
+  it('names the location in advanced mode', () => {
+    expect(callButtonLabel('advanced', 'Towson')).toBe('📞 Call Towson')
+    expect(callButtonLabel('advanced', null)).toBe('📞 Call Office')
   })
 })
 

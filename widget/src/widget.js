@@ -1,7 +1,7 @@
 import { AVATAR_COLORS, avatarColorIndex, initialsForName } from '../../src/shared/avatarPalette'
 import { readableTextColor } from '../../src/shared/colorContrast'
 import { bodyMapStyles, buildBodyMap } from './bodyMap'
-import { BOOKING_WORDS, SELF_SCHEDULE_WORDS, linkButtonLabel, linkSlideHeader, planLinkAction } from './linkAction'
+import { BOOKING_WORDS, SELF_SCHEDULE_WORDS, callButtonLabel, linkButtonLabel, linkSlideHeader, planLinkAction } from './linkAction'
 import { liveProviderLocations, withSharedValues } from './providerLocations'
 
 ;(function () {
@@ -1655,7 +1655,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             var callBtn = document.createElement('a')
             callBtn.className = 'pm-call'
             callBtn.href = 'tel:' + selPhonePl.phone
-            callBtn.textContent = '📞 Call ' + (selPhoneLoc ? selPhoneLoc.name : 'Office')
+            callBtn.textContent = callButtonLabel(phoneMode, selPhoneLoc ? selPhoneLoc.name : null)
             callBtn.onclick = function () {
               self.trackClick(provider.id)
               self.trackEvent('call_clicked')
@@ -1667,7 +1667,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             var callBtnFallback = document.createElement('a')
             callBtnFallback.className = 'pm-call'
             callBtnFallback.href = 'tel:' + firstPhoneFallback.phone
-            callBtnFallback.textContent = '📞 Call ' + (phoneLocsWithNumbers.length === 1 ? (firstPhoneLocFallback ? firstPhoneLocFallback.name : 'Office') : 'Office')
+            callBtnFallback.textContent = callButtonLabel(phoneMode, phoneLocsWithNumbers.length === 1 && firstPhoneLocFallback ? firstPhoneLocFallback.name : null)
             callBtnFallback.onclick = function () {
               self.trackClick(provider.id)
               self.trackEvent('call_clicked')
@@ -1690,7 +1690,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           var callBtn2 = document.createElement('a')
           callBtn2.className = 'pm-call'
           callBtn2.href = 'tel:' + firstPhonePl.phone
-          callBtn2.textContent = '📞 Call ' + (phoneLocsWithNumbers.length === 1 ? (firstPhoneLoc ? firstPhoneLoc.name : 'Office') : 'Office')
+          callBtn2.textContent = callButtonLabel(phoneMode, phoneLocsWithNumbers.length === 1 && firstPhoneLoc ? firstPhoneLoc.name : null)
           callBtn2.onclick = function () {
             self.trackClick(provider.id)
             self.trackEvent('call_clicked')
