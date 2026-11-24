@@ -396,10 +396,17 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-select:focus{outline:none;border-color:' + primaryColor + ';}',
         '.pm-results{display:flex;flex-direction:column;gap:6px;}',
         // Sticky results header. Sticky offsets are measured from inside the
-        // body's 16px padding, so top:-16px (with the matching negative margins)
-        // puts the white strip flush with the edges and keeps scrolling cards
+        // body's 16px padding, so top:-17px (with matching negative margins, and 1px
+        // over so no sub-pixel seam shows) puts the strip flush and keeps cards
         // from showing through above or beside the card while it is stuck.
-        '.pm-recap-sticky{position:sticky;top:-16px;z-index:3;margin:-16px -16px 6px;padding:12px 16px 10px;background:linear-gradient(#fff 82%,rgba(255,255,255,0));}',
+        '.pm-recap-sticky{position:sticky;top:-17px;z-index:3;margin:-16px -16px 6px;padding:13px 16px 10px;background:linear-gradient(#fff 82%,rgba(255,255,255,0));}',
+        '.pm-group{display:flex;flex-direction:column;gap:6px;}',
+        '.pm-group-head{position:sticky;top:-17px;z-index:3;margin:0 -16px;padding:13px 16px 8px;background:linear-gradient(#fff 85%,rgba(255,255,255,0));}',
+        '.pm-group-head .pm-outside-section{margin-top:0;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
+        '.pm-matches-head{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#f8fafc;background:color-mix(in srgb,' + primaryColor + ' 7%,#fff);border:1px solid #e2e8f0;border-color:color-mix(in srgb,' + primaryColor + ' 28%,#fff);border-left:5px solid ' + primaryColor + ';border-radius:12px;padding:10px 14px;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
+        '.pm-matches-title{font-size:16px;font-weight:800;color:#0f172a;line-height:1.25;overflow-wrap:anywhere;}',
+        '.pm-reasons{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}',
+        '.pm-reason{background:#fff;border:1px solid #fcd34d;color:#92400e;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;}',
         '.pm-recap{background:#f8fafc;background:color-mix(in srgb,' + primaryColor + ' 7%,#fff);border:1px solid #e2e8f0;border-color:color-mix(in srgb,' + primaryColor + ' 28%,#fff);border-left:5px solid ' + primaryColor + ';border-radius:12px;padding:10px 14px 11px;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
         '.pm-recap-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;}',
         '.pm-recap-eyebrow{font-size:10px;font-weight:800;letter-spacing:0.09em;text-transform:uppercase;color:' + primaryColor + ';}',
@@ -1399,12 +1406,57 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       })
       var results = document.createElement('div')
       results.className = 'pm-results'
-      function appendResultCard(provider, outsideArea) {
-        var card = self.buildCard(provider, outsideArea)
+      function appendResultCard(group, provider, outsideArea, reasons) {
+        var card = self.buildCard(provider, outsideArea, reasons)
         var pos = positionByProvider[provider.id]
         if (pos) card.setAttribute('data-position', String(pos))
-        results.appendChild(card)
-        return card
+        group.appendChild(card)
+      }
+      // The results are a stack of groups, each with its own sticky header. A
+      // sticky header only sticks inside its own group, so as one group scrolls
+      // away the next group's header takes over the top of the list.
+      function appendGroup(header) {
+        var group = document.createElement('div')
+        group.className = 'pm-group'
+        if (header) {
+          var strip = document.createElement('div')
+          strip.className = 'pm-group-head'
+          strip.appendChild(header)
+          group.appendChild(strip)
+        }
+        results.appendChild(group)
+        return group
+      }
+      function matchesHeader(title, count) {
+        var header = document.createElement('div')
+        header.className = 'pm-matches-head'
+        var label = document.createElement('div')
+        label.className = 'pm-matches-title'
+        label.textContent = title
+        header.appendChild(label)
+        var pill = document.createElement('span')
+        pill.className = 'pm-recap-count'
+        pill.textContent = count + (count === 1 ? ' provider' : ' providers')
+        header.appendChild(pill)
+        return header
+      }
+      function outsideHeader(titleText, subText) {
+        var header = document.createElement('div')
+        header.className = 'pm-outside-section'
+        var title = document.createElement('div')
+        title.className = 'pm-outside-title'
+        var icon = document.createElement('span')
+        icon.className = 'pm-outside-icon'
+        icon.setAttribute('aria-hidden', 'true')
+        icon.textContent = '⚠️'
+        title.appendChild(icon)
+        title.appendChild(document.createTextNode(titleText))
+        header.appendChild(title)
+        var sub = document.createElement('div')
+        sub.className = 'pm-outside-sub'
+        sub.textContent = subText
+        header.appendChild(sub)
+        return header
       }
       var caseTypeName = ''
       var selectedCaseType = (self.data.caseTypes || []).find(function (ct) { return ct.id === self.state.selectedCaseTypeId })
@@ -1414,26 +1466,25 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var selectedLocForHeader = (self.data.locations || []).find(function (l) { return l.id === self.state.selectedLocationId })
         if (selectedLocForHeader) selectedLocName = selectedLocForHeader.name
       }
+      // With a location picked, a match is a provider who is there. The rest fit
+      // everything else and follow under their own header.
+      var matched = unique
+      var offLocation = []
+      if (this.state.selectedLocationId) {
+        var atSelected = function (item) {
+          return (item.offering.location_ids || []).indexOf(self.state.selectedLocationId) > -1
+        }
+        matched = unique.filter(atSelected)
+        offLocation = unique.filter(function (item) {
+          return !atSelected(item)
+        })
+      }
       // A patient who already knows who they want to see gets the whole
       // directory to search, not just the providers their answers matched. The
       // ones who don't match come after, marked, so it is clear why they are
       // there. Analytics still count only the matched providers as shown.
       var unmatched = []
-      // Providers who fit everything but the location the patient picked. They
-      // don't count as matches here; they follow with the other providers,
-      // under the same "not at your selected location" label used elsewhere.
-      var offLocation = []
-      var matched = unique
       if (this.state.bypassMode) {
-        if (this.state.selectedLocationId) {
-          var atSelected = function (item) {
-            return (item.offering.location_ids || []).indexOf(self.state.selectedLocationId) > -1
-          }
-          matched = unique.filter(atSelected)
-          offLocation = unique.filter(function (item) {
-            return !atSelected(item)
-          })
-        }
         var matchedIds = {}
         unique.forEach(function (item) {
           matchedIds[item.provider.id] = true
@@ -1446,39 +1497,43 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             return String(a.name).localeCompare(String(b.name))
           })
       }
-      results.appendChild(
-        this.buildRecap(caseTypeName, selectedLocName, unique.length + unmatched.length, matched.length)
+      var top = appendGroup(null)
+      top.appendChild(
+        this.buildRecap(
+          caseTypeName,
+          selectedLocName,
+          this.state.bypassMode ? unique.length + unmatched.length : matched.length,
+          matched.length
+        )
       )
       if (this.state.bypassMode) {
         var search = document.createElement('input')
         search.className = 'pm-search'
         search.placeholder = 'Search by provider name...'
         search.setAttribute('aria-label', 'Search by provider name')
-        var unmatchedWrap = null
-        var unmatchedCards = []
+        var cardGroups = []
         var noSearchMatch = document.createElement('div')
         noSearchMatch.style.cssText = 'font-size:13px;color:#64748b;padding:8px 0;display:none;'
         noSearchMatch.textContent = 'No provider by that name. Try a different spelling.'
         search.oninput = function () {
           var q = search.value.toLowerCase()
           var anyShown = false
-          results.querySelectorAll('.pm-card').forEach(function (card) {
-            var name = card.querySelector('.pm-name')
-            if (!name) return
-            var show = name.textContent.toLowerCase().indexOf(q) > -1
-            card.style.display = show ? '' : 'none'
-            if (show) anyShown = true
-          })
-          // Don't leave the "not matched" heading hanging over nothing.
-          if (unmatchedWrap) {
-            var anyUnmatchedShown = unmatchedCards.some(function (c) {
-              return c.style.display !== 'none'
+          cardGroups.forEach(function (group) {
+            var groupShown = false
+            group.querySelectorAll('.pm-card').forEach(function (card) {
+              var name = card.querySelector('.pm-name')
+              if (!name) return
+              var show = name.textContent.toLowerCase().indexOf(q) > -1
+              card.style.display = show ? '' : 'none'
+              if (show) groupShown = true
             })
-            unmatchedWrap.style.display = anyUnmatchedShown ? '' : 'none'
-          }
+            // Don't leave a header hanging over nothing.
+            group.style.display = groupShown ? '' : 'none'
+            if (groupShown) anyShown = true
+          })
           noSearchMatch.style.display = anyShown ? 'none' : ''
         }
-        results.appendChild(search)
+        top.appendChild(search)
         var helpLink = document.createElement('div')
         helpLink.className = 'pm-help'
         helpLink.textContent = 'Help me choose instead'
@@ -1497,104 +1552,54 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           self.state.bypassResumeIndex = null
           self.renderQuestion()
         }
-        results.appendChild(helpLink)
-        results.appendChild(noSearchMatch)
-        matched.forEach(function (item) {
-          appendResultCard(item.provider, false)
-        })
+        top.appendChild(helpLink)
+        top.appendChild(noSearchMatch)
+        if (matched.length) {
+          var found = appendGroup(matchesHeader('Matches', matched.length))
+          cardGroups.push(found)
+          matched.forEach(function (item) {
+            appendResultCard(found, item.provider, false)
+          })
+        }
         if (unmatched.length || offLocation.length) {
-          unmatchedWrap = document.createElement('div')
-          unmatchedWrap.className = 'pm-outside-section'
-          var unmatchedTitle = document.createElement('div')
-          unmatchedTitle.className = 'pm-outside-title'
-          var unmatchedIcon = document.createElement('span')
-          unmatchedIcon.className = 'pm-outside-icon'
-          unmatchedIcon.setAttribute('aria-hidden', 'true')
-          unmatchedIcon.textContent = '⚠️'
-          unmatchedTitle.appendChild(unmatchedIcon)
-          unmatchedTitle.appendChild(document.createTextNode('Providers outside your requirements'))
-          unmatchedWrap.appendChild(unmatchedTitle)
-          // One plain statement for the whole group. It is true for every
-          // provider here whatever ruled them out (the condition, an age limit,
-          // another answer), because it says only that they don't match the
-          // patient's answers.
-          var unmatchedSub = document.createElement('div')
-          unmatchedSub.className = 'pm-outside-sub'
-          unmatchedSub.textContent =
-            "The providers below don't match your requirements based on your answers above."
-          unmatchedWrap.appendChild(unmatchedSub)
-          results.appendChild(unmatchedWrap)
+          var others = appendGroup(
+            outsideHeader(
+              'Providers outside your requirements',
+              "The providers below don't match your requirements based on your answers above."
+            )
+          )
+          cardGroups.push(others)
           offLocation.forEach(function (item) {
-            unmatchedCards.push(appendResultCard(item.provider, true))
+            appendResultCard(others, item.provider, true, self.mismatchReasons(item.provider))
           })
           unmatched.forEach(function (provider) {
-            var card = self.buildCard(provider, false, true)
-            unmatchedCards.push(card)
-            results.appendChild(card)
+            appendResultCard(others, provider, false, self.mismatchReasons(provider))
           })
         }
       } else {
-        var remaining = unique.slice()
-        if (this.state.selectedLocationId) {
-          var atLoc = remaining.filter(function (item) {
-            return (
-              item.offering.location_ids &&
-              item.offering.location_ids.indexOf(self.state.selectedLocationId) > -1
+        var matches = appendGroup(
+          matchesHeader(selectedLocName ? 'Matches at ' + selectedLocName : 'Matches', matched.length)
+        )
+        if (!matched.length) {
+          var noMatch = document.createElement('div')
+          noMatch.style.cssText = 'font-size:13px;color:#64748b;padding:8px 0;'
+          noMatch.textContent = 'There are no specialists for this case type at ' + selectedLocName + '.'
+          matches.appendChild(noMatch)
+        }
+        matched.forEach(function (item) {
+          appendResultCard(matches, item.provider, false)
+        })
+        // show_worth_the_drive gates this section entirely — the org can
+        // turn it off if they'd rather only ever show in-location matches.
+        if (offLocation.length && config.show_worth_the_drive !== false) {
+          var elsewhere = appendGroup(
+            outsideHeader(
+              'Not at ' + selectedLocName,
+              'These providers treat this, but not at ' + selectedLocName + ' — only at another location.'
             )
-          })
-          var outsideLoc = remaining.filter(function (item) {
-            return (
-              !item.offering.location_ids ||
-              item.offering.location_ids.indexOf(self.state.selectedLocationId) === -1
-            )
-          })
-          var locName = ''
-          var foundLoc = (this.data.locations || []).find(function (l) {
-            return l.id === self.state.selectedLocationId
-          })
-          if (foundLoc) locName = foundLoc.name
-          var sec2 = document.createElement('div')
-          sec2.className = 'pm-section-title'
-          sec2.textContent = 'Providers at ' + locName
-          results.appendChild(sec2)
-          if (!atLoc.length) {
-            var noMatch = document.createElement('div')
-            noMatch.style.cssText = 'font-size:13px;color:#64748b;padding:8px 0;'
-            noMatch.textContent =
-              'There are no specialists for this case type at ' + locName + '.'
-            results.appendChild(noMatch)
-          } else {
-            atLoc.forEach(function (item) {
-              appendResultCard(item.provider, false)
-            })
-          }
-          // show_worth_the_drive gates this section entirely — the org can
-          // turn it off if they'd rather only ever show in-location matches.
-          if (outsideLoc.length && config.show_worth_the_drive !== false) {
-            var outsideWrap = document.createElement('div')
-            outsideWrap.className = 'pm-outside-section'
-            var sec3 = document.createElement('div')
-            sec3.className = 'pm-outside-title'
-            var sec3Icon = document.createElement('span')
-            sec3Icon.className = 'pm-outside-icon'
-            sec3Icon.setAttribute('aria-hidden', 'true')
-            sec3Icon.textContent = '⚠️'
-            sec3.appendChild(sec3Icon)
-            sec3.appendChild(document.createTextNode('Not at ' + locName))
-            outsideWrap.appendChild(sec3)
-            var sec3sub = document.createElement('div')
-            sec3sub.className = 'pm-outside-sub'
-            sec3sub.textContent =
-              'These providers treat this, but not at ' + locName + ' — only at another location.'
-            outsideWrap.appendChild(sec3sub)
-            results.appendChild(outsideWrap)
-            outsideLoc.forEach(function (item) {
-              appendResultCard(item.provider, true)
-            })
-          }
-        } else {
-          remaining.forEach(function (item) {
-            appendResultCard(item.provider, false)
+          )
+          offLocation.forEach(function (item) {
+            appendResultCard(elsewhere, item.provider, true)
           })
         }
       }
@@ -1677,12 +1682,71 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       })
     },
 
-    // `unmatched` marks a provider shown to a patient who asked to browse
-    // everyone but whom the patient's answers didn't match. They are labeled as
-    // not matching, and their contact details come from wherever they do
-    // practise rather than from the patient's case type, which they may not
-    // see at all.
-    buildCard: function (provider, outsideArea, unmatched) {
+    // Why a provider doesn't fit the patient's answers, as short general tags.
+    // Deliberately says which rule, never the rule's value: no age limits. Each
+    // rule is judged on its own, by the same filters the questions use, so
+    // every reason that applies is named. A rule an org defined that can't be
+    // worded safely adds no tag; the card's flag still says they don't match.
+    mismatchReasons: function (provider) {
+      var self = this
+      var caseTypeId = this.state.selectedCaseTypeId
+      var offerings = (this.data.offerings || []).filter(function (o) {
+        return o.provider_id === provider.id && o.case_type_id === caseTypeId
+      })
+      if (!offerings.length) {
+        var caseType = (this.data.caseTypes || []).find(function (ct) {
+          return ct.id === caseTypeId
+        })
+        // Their limits and locations for this condition don't exist to compare.
+        return caseType ? ["Doesn't see " + caseType.name + ' patients'] : []
+      }
+      var reasons = []
+      this.getQuestionSequence().forEach(function (q) {
+        if (q.question_type !== 'clinical') return
+        var value = self.state.answers[q.id]
+        if (value === undefined || value === null) return
+        var c = self.findConstraint(q.constraint_id)
+        if (!c) return
+        var name = (c.name || '').trim()
+        if (c.type === 'range') {
+          var isAge = /\bage\b/i.test(name) || /(^|_)age(_|$)/i.test(c.mapped_key || '')
+          if (!isAge || filterRange(offerings, c, value).length) return
+          var under = offerings.every(function (o) {
+            return Number((o.constraints || {})[c.mapped_key] ?? 0) > value
+          })
+          reasons.push(under ? 'Under minimum age' : 'Over maximum age')
+        } else if (c.type === 'binary') {
+          if (filterBinary(offerings, c, value === 'yes').length) return
+          // "Sports Only" and the like: the rule's own name says what they take.
+          var limitedTo = offerings.every(function (o) {
+            var v = (o.constraints || {})[c.mapped_key]
+            return v === 1 || v === '1' || v === true
+          })
+          if (!limitedTo || !/\bonly$/i.test(name)) return
+          reasons.push(/^sports?\b/i.test(name) ? 'Sports injuries only' : name)
+        }
+      })
+      var locationId = this.state.selectedLocationId
+      if (
+        locationId &&
+        !offerings.some(function (o) {
+          return (o.location_ids || []).indexOf(locationId) > -1
+        })
+      ) {
+        var location = (this.data.locations || []).find(function (l) {
+          return l.id === locationId
+        })
+        if (location) reasons.push('Not at ' + location.name)
+      }
+      return reasons
+    },
+
+    // `reasons` (see mismatchReasons) marks a provider shown to a patient who
+    // asked to browse everyone but whom the patient's answers didn't match.
+    // Unless only the location is off (`outsideArea`), their contact details
+    // come from wherever they do practise rather than from the patient's case
+    // type, which they may not see at all.
+    buildCard: function (provider, outsideArea, reasons) {
       var self = this
       var config = this.data.config || {}
 
@@ -1701,7 +1765,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           this.data.providerLocations,
           this.data.offerings,
           provider.id,
-          unmatched ? null : this.state.selectedCaseTypeId
+          reasons && !outsideArea ? null : this.state.selectedCaseTypeId
         ),
         bookingMode,
         phoneMode,
@@ -1710,15 +1774,26 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
 
       // Build card
       var card = document.createElement('div')
-      card.className = outsideArea || unmatched ? 'pm-card pm-card-outside' : 'pm-card'
+      card.className = outsideArea || reasons ? 'pm-card pm-card-outside' : 'pm-card'
 
-      if (outsideArea || unmatched) {
+      if (outsideArea || reasons) {
         var outsideBadge = document.createElement('div')
         outsideBadge.className = 'pm-outside-badge'
-        outsideBadge.textContent = outsideArea
-          ? '📍 Not at your selected location'
-          : "⚠️ Doesn't match your requirements"
+        outsideBadge.textContent = reasons
+          ? "⚠️ Doesn't match your requirements"
+          : '📍 Not at your selected location'
         card.appendChild(outsideBadge)
+        if (reasons && reasons.length) {
+          var reasonTags = document.createElement('div')
+          reasonTags.className = 'pm-reasons'
+          reasons.forEach(function (reason) {
+            var tag = document.createElement('span')
+            tag.className = 'pm-reason'
+            tag.textContent = reason
+            reasonTags.appendChild(tag)
+          })
+          card.appendChild(reasonTags)
+        }
       }
 
       // Avatar
@@ -1991,7 +2066,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
 
       // A provider with no live offering has no contact details of their own;
       // send the patient to the main office rather than leaving a dead end.
-      if (unmatched && !defaultPanel.children.length && !linkSlides.length && config.fallback_phone) {
+      if (reasons && !outsideArea && !defaultPanel.children.length && !linkSlides.length && config.fallback_phone) {
         var officeBtn = document.createElement('a')
         officeBtn.className = 'pm-call'
         officeBtn.href = 'tel:' + config.fallback_phone
@@ -2196,7 +2271,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     'getQuestionSequence', 'findConstraint', 'renderQuestion', 'renderCaseTypes',
     'renderLocationSelect', 'renderProviderChoice', 'renderBinary', 'renderRange',
     'renderExact', 'handleAnswer', 'goBack', 'showZeroResults', 'showResults',
-    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer',
+    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer', 'mismatchReasons',
   ].forEach(function (name) {
     var original = widget[name]
     if (typeof original !== 'function') return

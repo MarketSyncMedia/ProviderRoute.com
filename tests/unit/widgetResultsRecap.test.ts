@@ -63,7 +63,9 @@ const click = (el: Element | null) => (el as HTMLButtonElement).click()
 const option = (body: HTMLElement, text: string) =>
   Array.from(body.querySelectorAll<HTMLButtonElement>('button.pm-option')).find((b) => b.textContent === text) ?? null
 
-const pills = (body: HTMLElement) => Array.from(body.querySelectorAll('.pm-recap-count')).map((p) => p.textContent)
+const pills = (body: HTMLElement) => Array.from(body.querySelectorAll('.pm-recap .pm-recap-count')).map((p) => p.textContent)
+
+const tags = (card: Element) => Array.from(card.querySelectorAll('.pm-reason')).map((t) => t.textContent)
 
 /** Pick the case type from the list, then answer the provider question. */
 async function startAs(body: HTMLElement, knowsProvider: 'Yes' | 'No') {
@@ -102,7 +104,7 @@ describe('the results recap card', () => {
     const card = body.querySelector('.pm-recap')!
     expect(card).not.toBeNull()
     expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
-    expect(card.querySelector('.pm-recap-count')!.textContent).toBe('3 providers')
+    expect(card.querySelector('.pm-recap-count')!.textContent).toBe('2 providers')
     expect(card.querySelector('.pm-recap-note')!.textContent).toBe('Filtered by your answers.')
 
     const rows = Array.from(body.querySelectorAll('.pm-answer-row')).map((r) => [
@@ -137,7 +139,7 @@ describe('the results recap card', () => {
 
     const results = body.querySelector('.pm-results')!
     const sticky = results.querySelector('.pm-recap-sticky')!
-    expect(results.firstElementChild).toBe(sticky)
+    expect(results.firstElementChild!.firstElementChild).toBe(sticky)
     expect(sticky.querySelector('.pm-recap')).not.toBeNull()
     // The sticky strip comes before the first provider card.
     const firstCard = results.querySelector('.pm-card')!
@@ -211,14 +213,18 @@ describe('"I already know who I want to see"', () => {
       const cards = Array.from(body.querySelectorAll('.pm-card-outside'))
       // Dr. 2 fits everything but Towson, so they say so and aren't counted as a match.
       expect(cards.map((c) => c.querySelector('.pm-name')!.textContent)).toEqual(['Dr. 2', 'Dr. 4', 'Dr. 5', 'Dr. 6'])
-      expect(cards[0].querySelector('.pm-outside-badge')!.textContent).toBe('📍 Not at your selected location')
       expect(pills(body)).toEqual(['2 matches', '6 providers'])
-      cards.slice(1).forEach((c) => {
+      cards.forEach((c) => {
         expect(c.querySelector('.pm-outside-badge')!.textContent).toBe("⚠️ Doesn't match your requirements")
-        // Just the label: no extra line under it.
-        expect(c.querySelector('.pm-outside-note')).toBeNull()
-        expect(c.textContent).not.toContain('scheduled for')
       })
+      // Under the flag, the reasons: general, never the rule's own numbers.
+      expect(cards.map(tags)).toEqual([
+        ['Not at Towson'],
+        ["Doesn't see Elbow patients"],
+        ["Doesn't see Elbow patients"],
+        ['Over maximum age'],
+      ])
+      expect(cards[3].textContent).not.toContain('12')
     } finally {
       providerQuestion.order_rank = 1
       payload.providers.pop()
@@ -241,7 +247,8 @@ describe('"I already know who I want to see"', () => {
     const { body } = await boot()
     await startAs(body, 'Yes')
     const search = body.querySelector('input.pm-search') as HTMLInputElement
-    const heading = body.querySelector('.pm-outside-section') as HTMLElement
+    const heading = body.querySelector('.pm-outside-section')!.closest('.pm-group') as HTMLElement
+    const matches = body.querySelector('.pm-matches-head')!.closest('.pm-group') as HTMLElement
     const visible = () =>
       Array.from(body.querySelectorAll<HTMLElement>('.pm-card'))
         .filter((c) => c.style.display !== 'none')
@@ -254,6 +261,7 @@ describe('"I already know who I want to see"', () => {
     type('dr. 5')
     expect(visible()).toEqual(['Dr. 5'])
     expect(heading.style.display).toBe('')
+    expect(matches.style.display).toBe('none')
 
     type('dr. 1')
     expect(visible()).toEqual(['Dr. 1'])
@@ -289,6 +297,89 @@ describe('"I already know who I want to see"', () => {
     expect(results.textContent).not.toContain("Doesn't match your requirements")
     expect(Array.from(results.querySelectorAll('.pm-name')).map((n) => n.textContent).sort()).toEqual(['Dr. 1', 'Dr. 2', 'Dr. 3'])
     expect(results.querySelector('input.pm-search')).toBeNull()
+  })
+})
+
+describe('section headers that take over as the list scrolls', () => {
+  /** Each group's sticky header, and the names of the providers inside that group. */
+  const groups = (body: HTMLElement) =>
+    Array.from(body.querySelectorAll('.pm-results > .pm-group')).map((g) => [
+      g.querySelector('.pm-recap-title, .pm-matches-title, .pm-outside-title')!.textContent,
+      Array.from(g.querySelectorAll('.pm-name')).map((n) => n.textContent).sort(),
+    ])
+  async function answerTowsonAge45(body: HTMLElement) {
+    ;(body.querySelector('select.pm-select') as HTMLSelectElement).value = 'towson'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '45'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+  }
+
+  it('gives the search its recap, Matches and outside groups, in that order', async () => {
+    const { body } = await boot()
+    await startAs(body, 'Yes')
+    expect(groups(body)).toEqual([
+      ['Find your provider', []],
+      ['Matches', ['Dr. 1', 'Dr. 2', 'Dr. 3']],
+      ['⚠️Providers outside your requirements', ['Dr. 4', 'Dr. 5']],
+    ])
+    expect(body.querySelector('.pm-matches-head .pm-recap-count')!.textContent).toBe('3 providers')
+  })
+
+  it('gives Help me choose the same: recap, Matches at the location, then not at it', async () => {
+    const { body } = await boot()
+    await startAs(body, 'No')
+    await answerTowsonAge45(body)
+    expect(groups(body)).toEqual([
+      ['Elbow specialists · Towson', []],
+      ['Matches at Towson', ['Dr. 1', 'Dr. 3']],
+      ['⚠️Not at Towson', ['Dr. 2']],
+    ])
+    // Its own cards keep the location label; the flag and tags are the search's.
+    expect(body.querySelector('.pm-card-outside .pm-outside-badge')!.textContent).toBe('📍 Not at your selected location')
+    expect(body.querySelector('.pm-reason')).toBeNull()
+  })
+})
+
+describe('why a provider does not match', () => {
+  type Api = { data: unknown; state: Record<string, unknown>; mismatchReasons: (p: { id: string }) => string[] }
+  const questions = [
+    { id: 'q-entry', question_type: 'entry', question_text: 'What hurts?', order_rank: 0 },
+    { id: 'q-age', question_type: 'clinical', constraint_id: 'c-age', question_text: 'Age?', order_rank: 1 },
+    { id: 'q-sport', question_type: 'clinical', constraint_id: 'c-sport', question_text: 'Sports injury?', order_rank: 2 },
+    { id: 'q-other', question_type: 'clinical', constraint_id: 'c-other', question_text: 'Other?', order_rank: 3 },
+  ]
+  async function reasons(constraints: Record<string, unknown>, answers: Record<string, unknown>, opts: { caseType?: string; at?: string | null } = {}) {
+    const { pm } = await boot()
+    const w = pm as unknown as Api
+    w.data = {
+      ...payload,
+      questions,
+      constraints: [
+        { id: 'c-age', name: 'Age Range', type: 'range', mapped_key: 'age_min', secondary_mapped_key: 'age_max' },
+        { id: 'c-sport', name: 'Sports Only', type: 'binary', mapped_key: 'Sports_only', yes_maps_to: 'both', no_maps_to: '0' },
+        { id: 'c-other', name: 'Accepts referrals', type: 'binary', mapped_key: 'ref', yes_maps_to: '1', no_maps_to: 'both' },
+      ],
+      offerings: [{ id: 'o', provider_id: 'p1', case_type_id: opts.caseType ?? 'elbow', location_ids: ['towson'], constraints }],
+    }
+    w.state.selectedCaseTypeId = 'elbow'
+    w.state.selectedLocationId = opts.at ?? null
+    w.state.answers = { 'q-entry': 'elbow', ...answers }
+    return w.mismatchReasons({ id: 'p1' })
+  }
+
+  it.each([
+    ['under the minimum age', { age_min: 40, age_max: 200 }, { 'q-age': 15 }, {}, ['Under minimum age']],
+    ['over the maximum age', { age_min: 0, age_max: 18 }, { 'q-age': 45 }, {}, ['Over maximum age']],
+    ['a sports-only provider', { age_min: 0, age_max: 200, Sports_only: 1 }, { 'q-age': 15, 'q-sport': 'no' }, {}, ['Sports injuries only']],
+    ['another location', { age_min: 0, age_max: 200 }, { 'q-age': 15 }, { at: 'rosedale' }, ['Not at Rosedale']],
+    ['every reason at once', { age_min: 40, age_max: 200, Sports_only: 1 }, { 'q-age': 15, 'q-sport': 'no' }, { at: 'rosedale' }, ['Under minimum age', 'Sports injuries only', 'Not at Rosedale']],
+    ['a different condition, and only that', { age_min: 40 }, { 'q-age': 15 }, { caseType: 'knee', at: 'rosedale' }, ["Doesn't see Elbow patients"]],
+    ['a custom rule with no safe wording', { age_min: 0, age_max: 200 }, { 'q-other': 'yes' }, {}, []],
+    ['a provider who fits', { age_min: 0, age_max: 200 }, { 'q-age': 15, 'q-sport': 'yes' }, { at: 'towson' }, []],
+  ])('%s', async (_name, constraints, answers, opts, expected) => {
+    expect(await reasons(constraints, answers, opts)).toEqual(expected)
   })
 })
 
