@@ -395,6 +395,24 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-select{width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:16px;font-family:inherit;background:white;}',
         '.pm-select:focus{outline:none;border-color:' + primaryColor + ';}',
         '.pm-results{display:flex;flex-direction:column;gap:6px;}',
+        // Sticky results header. Sticky offsets are measured from inside the
+        // body's 16px padding, so top:-16px (with the matching negative margins)
+        // puts the white strip flush with the edges and keeps scrolling cards
+        // from showing through above or beside the card while it is stuck.
+        '.pm-recap-sticky{position:sticky;top:-16px;z-index:3;margin:-16px -16px 6px;padding:12px 16px 10px;background:linear-gradient(#fff 82%,rgba(255,255,255,0));}',
+        '.pm-recap{background:#f8fafc;background:color-mix(in srgb,' + primaryColor + ' 7%,#fff);border:1px solid #e2e8f0;border-color:color-mix(in srgb,' + primaryColor + ' 28%,#fff);border-left:5px solid ' + primaryColor + ';border-radius:12px;padding:10px 14px 11px;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
+        '.pm-recap-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}',
+        '.pm-recap-eyebrow{font-size:10px;font-weight:800;letter-spacing:0.09em;text-transform:uppercase;color:' + primaryColor + ';}',
+        '.pm-recap-count{background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;}',
+        '.pm-recap-title{font-size:17px;font-weight:800;color:#0f172a;line-height:1.25;margin-top:4px;overflow-wrap:anywhere;}',
+        '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:3px;}',
+        '.pm-answers{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px 4px;margin-bottom:6px;}',
+        '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#64748b;margin-bottom:8px;}',
+        '.pm-answer-row{display:flex;align-items:flex-start;gap:10px;padding-bottom:10px;}',
+        '.pm-answer-check{flex-shrink:0;width:18px;height:18px;margin-top:1px;border-radius:50%;background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;line-height:18px;text-align:center;}',
+        '.pm-answer-text{min-width:0;}',
+        '.pm-answer-q{font-size:11px;color:#64748b;line-height:1.35;overflow-wrap:anywhere;}',
+        '.pm-answer-a{font-size:14px;font-weight:700;color:#1e293b;line-height:1.35;overflow-wrap:anywhere;}',
         '.pm-section-title{font-weight:700;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;padding:10px 0 4px;}',
         '.pm-cat-title{font-weight:600;font-size:14px;color:#1e293b;padding:4px 0 2px;}',
         '.pm-card{display:flex;flex-direction:column;background:#f8fafc;border-radius:12px;padding:12px;gap:0;}',
@@ -1086,6 +1104,107 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       this.renderQuestion()
     },
 
+    // Every question the patient has answered so far, in the order asked, as
+    // { question, answer } with the answer in the words they saw on the button.
+    // Shared by the results recap card and the "no results" screen.
+    getAnswerRows: function () {
+      var self = this
+      var rows = []
+      this.getQuestionSequence().forEach(function (q) {
+        if (!Object.prototype.hasOwnProperty.call(self.state.answers, q.id)) return
+        var value = self.state.answers[q.id]
+        var displayVal = ''
+        if (q.question_type === 'location') {
+          if (value === null) {
+            displayVal = 'No preference'
+          } else {
+            var loc = (self.data.locations || []).find(function (l) {
+              return l.id === value
+            })
+            displayVal = loc ? loc.name : String(value)
+          }
+        } else if (value === null || value === undefined) {
+          // An optional question the patient skipped.
+          displayVal = 'Skipped'
+        } else if (q.question_type === 'entry') {
+          var ct = (self.data.caseTypes || []).find(function (c) {
+            return c.id === value
+          })
+          displayVal = ct ? ct.name : String(value)
+        } else if (q.question_type === 'clinical') {
+          var constraint = self.findConstraint(q.constraint_id)
+          if (constraint && constraint.type === 'binary') {
+            if (value === 'yes') displayVal = constraint.yes_label || 'Yes'
+            else if (value === 'no') displayVal = constraint.no_label || 'No'
+            else displayVal = String(value)
+          } else {
+            displayVal = String(value)
+          }
+        } else if (q.question_type === 'provider') {
+          displayVal = value === 'yes' ? 'Yes' : value === 'no' ? 'No' : String(value)
+        } else {
+          displayVal = String(value)
+        }
+        rows.push({ question: q.question_text || '', answer: displayVal })
+      })
+      return rows
+    },
+
+    // The results header: a card that sticks to the top while the list scrolls,
+    // saying plainly that this is a filtered list and what it was filtered by,
+    // followed by the patient's own answers played back to them.
+    buildRecap: function (caseTypeName, locationName, count) {
+      var self = this
+      var frag = document.createDocumentFragment()
+      function el(tag, className, text) {
+        var node = document.createElement(tag)
+        if (className) node.className = className
+        if (text !== undefined) node.textContent = text
+        return node
+      }
+      var plural = count === 1 ? 'provider' : 'providers'
+
+      if (caseTypeName) {
+        var sticky = el('div', 'pm-recap-sticky')
+        var card = el('div', 'pm-recap')
+        var top = el('div', 'pm-recap-top')
+        top.appendChild(el('span', 'pm-recap-eyebrow', 'Your matches'))
+        top.appendChild(el('span', 'pm-recap-count', count + ' ' + plural))
+        card.appendChild(top)
+        card.appendChild(
+          el('div', 'pm-recap-title', caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : ''))
+        )
+        card.appendChild(
+          el(
+            'div',
+            'pm-recap-note',
+            this.state.bypassMode
+              ? 'Everyone who treats ' + caseTypeName.toLowerCase() + ' — not filtered by your answers.'
+              : 'Filtered by your answers — not everyone we have.'
+          )
+        )
+        sticky.appendChild(card)
+        frag.appendChild(sticky)
+      }
+
+      var rows = this.getAnswerRows()
+      if (rows.length) {
+        var panel = el('div', 'pm-answers')
+        panel.appendChild(el('div', 'pm-answers-title', 'What you told us'))
+        rows.forEach(function (r) {
+          var row = el('div', 'pm-answer-row')
+          row.appendChild(el('span', 'pm-answer-check', '✓'))
+          var text = el('div', 'pm-answer-text')
+          text.appendChild(el('div', 'pm-answer-q', r.question))
+          text.appendChild(el('div', 'pm-answer-a', r.answer))
+          row.appendChild(text)
+          panel.appendChild(row)
+        })
+        frag.appendChild(panel)
+      }
+      return frag
+    },
+
     showZeroResults: function () {
       var self = this
       // Record the outcome before any DOM rendering, and emit a per-attempt event
@@ -1109,47 +1228,14 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       var answersList = document.createElement('div')
       answersList.style.cssText =
         'text-align:left;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:10px;'
-      var seq = this.getQuestionSequence()
-      var hasAnswers = false
-      seq.forEach(function (q) {
-        if (!Object.prototype.hasOwnProperty.call(self.state.answers, q.id)) return
-        hasAnswers = true
-        var value = self.state.answers[q.id]
-        var displayVal = ''
-        if (q.question_type === 'entry') {
-          var ct = (self.data.caseTypes || []).find(function (c) {
-            return c.id === value
-          })
-          displayVal = ct ? ct.name : String(value)
-        } else if (q.question_type === 'location') {
-          if (value === null) {
-            displayVal = 'No preference'
-          } else {
-            var loc = (self.data.locations || []).find(function (l) {
-              return l.id === value
-            })
-            displayVal = loc ? loc.name : String(value)
-          }
-        } else if (q.question_type === 'clinical') {
-          var constraint = self.findConstraint(q.constraint_id)
-          if (constraint && constraint.type === 'binary') {
-            if (value === 'yes') displayVal = constraint.yes_label || 'Yes'
-            else if (value === 'no') displayVal = constraint.no_label || 'No'
-            else displayVal = String(value)
-          } else {
-            displayVal = String(value)
-          }
-        } else if (q.question_type === 'provider') {
-          displayVal = value === 'yes' ? 'Yes' : value === 'no' ? 'No' : String(value)
-        } else {
-          displayVal = String(value)
-        }
+      var answerRows = this.getAnswerRows()
+      answerRows.forEach(function (r) {
         var row = document.createElement('div')
         row.style.cssText = 'font-size:13px;color:#475569;margin-bottom:8px;line-height:1.4;'
-        row.textContent = q.question_text + ' → ' + displayVal
+        row.textContent = r.question + ' → ' + r.answer
         answersList.appendChild(row)
       })
-      if (hasAnswers) {
+      if (answerRows.length) {
         div.appendChild(answersList)
       }
 
@@ -1248,12 +1334,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var selectedLocForHeader = (self.data.locations || []).find(function (l) { return l.id === self.state.selectedLocationId })
         if (selectedLocForHeader) selectedLocName = selectedLocForHeader.name
       }
-      if (caseTypeName) {
-        var header = document.createElement('div')
-        header.style.cssText = 'font-size:15px;font-weight:600;color:#1e293b;padding:4px 0 12px;'
-        header.textContent = 'Results for ' + caseTypeName + (selectedLocName ? ' at ' + selectedLocName : '')
-        results.appendChild(header)
-      }
+      results.appendChild(this.buildRecap(caseTypeName, selectedLocName, unique.length))
       if (this.state.bypassMode) {
         var search = document.createElement('input')
         search.className = 'pm-search'
@@ -1936,7 +2017,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     'getQuestionSequence', 'findConstraint', 'renderQuestion', 'renderCaseTypes',
     'renderLocationSelect', 'renderProviderChoice', 'renderBinary', 'renderRange',
     'renderExact', 'handleAnswer', 'goBack', 'showZeroResults', 'showResults',
-    'renderGrouped', 'setupScrollDepthTracking', 'buildCard',
+    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap',
   ].forEach(function (name) {
     var original = widget[name]
     if (typeof original !== 'function') return
