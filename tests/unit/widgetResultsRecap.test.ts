@@ -63,6 +63,8 @@ const click = (el: Element | null) => (el as HTMLButtonElement).click()
 const option = (body: HTMLElement, text: string) =>
   Array.from(body.querySelectorAll<HTMLButtonElement>('button.pm-option')).find((b) => b.textContent === text) ?? null
 
+const pills = (body: HTMLElement) => Array.from(body.querySelectorAll('.pm-recap-count')).map((p) => p.textContent)
+
 /** Pick the case type from the list, then answer the provider question. */
 async function startAs(body: HTMLElement, knowsProvider: 'Yes' | 'No') {
   click(body.querySelector('button.pm-option'))
@@ -120,11 +122,11 @@ describe('the results recap card', () => {
     await startAs(body, 'Yes')
 
     const card = body.querySelector('.pm-recap')!
-    expect(card.querySelector('.pm-recap-eyebrow')!.textContent).toBe('All providers')
-    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Search for your provider')
-    expect(card.querySelector('.pm-recap-count')!.textContent).toBe('5 providers')
+    expect(card.querySelector('.pm-recap-eyebrow')).toBeNull()
+    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Find your provider')
+    expect(pills(body)).toEqual(['3 matches', '5 providers'])
     expect(card.querySelector('.pm-recap-note')!.textContent).toBe(
-      'Our whole team is listed below, with the specialists who see your type of visit first.'
+      '3 providers match your answers and appear first. Search to see if yours is one of them.'
     )
     expect(Array.from(body.querySelectorAll('.pm-answer-a')).map((a) => a.textContent)).toEqual(['Elbow', 'Yes'])
   })
@@ -148,7 +150,10 @@ describe('the results recap card', () => {
     try {
       const { body } = await boot()
       await startAs(body, 'Yes')
-      expect(body.querySelector('.pm-recap-count')!.textContent).toBe('1 provider')
+      expect(pills(body)).toEqual(['1 match', '1 provider'])
+      expect(body.querySelector('.pm-recap-note')!.textContent).toBe(
+        '1 provider matches your answers and appears first. Search to see if it’s yours.'
+      )
     } finally {
       payload.offerings.push(...offerings)
       payload.providers.push(...providers)
@@ -204,8 +209,11 @@ describe('"I already know who I want to see"', () => {
 
       // Dr. 6 treats elbow (children only), Dr. 4 doesn't treat it at all: both are simply outside the patient's requirements.
       const cards = Array.from(body.querySelectorAll('.pm-card-outside'))
-      expect(cards.map((c) => c.querySelector('.pm-name')!.textContent)).toEqual(['Dr. 4', 'Dr. 5', 'Dr. 6'])
-      cards.forEach((c) => {
+      // Dr. 2 fits everything but Towson, so they say so and aren't counted as a match.
+      expect(cards.map((c) => c.querySelector('.pm-name')!.textContent)).toEqual(['Dr. 2', 'Dr. 4', 'Dr. 5', 'Dr. 6'])
+      expect(cards[0].querySelector('.pm-outside-badge')!.textContent).toBe('📍 Not at your selected location')
+      expect(pills(body)).toEqual(['2 matches', '6 providers'])
+      cards.slice(1).forEach((c) => {
         expect(c.querySelector('.pm-outside-badge')!.textContent).toBe("⚠️ Doesn't match your requirements")
         // Just the label: no extra line under it.
         expect(c.querySelector('.pm-outside-note')).toBeNull()
@@ -374,6 +382,20 @@ describe('editing an answer from the results', () => {
     // The age is asked again before any results.
     expect(body.querySelector('input.pm-number-input')).not.toBeNull()
     expect(body.querySelector('.pm-results')).toBeNull()
+  })
+
+  it('leaves the search of everyone when "Yes, I know who" is changed to No', async () => {
+    const { pm, body } = await boot()
+    await startAs(body, 'Yes')
+    click(edit(body))
+    click(changeFor(body, 'Do you already know who you want to see?'))
+    click(option(body, 'No'))
+    await vi.advanceTimersByTimeAsync(400)
+
+    // On to the next question, not back to the search.
+    expect(pm.state.bypassMode).toBe(false)
+    expect(body.querySelector('.pm-results')).toBeNull()
+    expect(body.querySelector('select.pm-select')).not.toBeNull()
   })
 
   it('can change the first answer, the condition itself', async () => {
