@@ -401,9 +401,13 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         // from showing through above or beside the card while it is stuck.
         '.pm-recap-sticky{position:sticky;top:-16px;z-index:3;margin:-16px -16px 6px;padding:12px 16px 10px;background:linear-gradient(#fff 82%,rgba(255,255,255,0));}',
         '.pm-recap{background:#f8fafc;background:color-mix(in srgb,' + primaryColor + ' 7%,#fff);border:1px solid #e2e8f0;border-color:color-mix(in srgb,' + primaryColor + ' 28%,#fff);border-left:5px solid ' + primaryColor + ';border-radius:12px;padding:10px 14px 11px;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
-        '.pm-recap-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}',
+        '.pm-recap-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;}',
         '.pm-recap-eyebrow{font-size:10px;font-weight:800;letter-spacing:0.09em;text-transform:uppercase;color:' + primaryColor + ';}',
         '.pm-recap-count{background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;}',
+        '.pm-recap-top .pm-recap-title{margin-top:0;font-size:16px;white-space:nowrap;}',
+        '.pm-recap-pills{display:flex;gap:4px;margin-left:auto;}',
+        '.pm-recap-pills .pm-recap-count{font-size:10px;padding:3px 7px;}',
+        '.pm-recap-pills .pm-recap-count-total{background:#fff;color:#334155;box-shadow:inset 0 0 0 1px #cbd5e1;}',
         '.pm-recap-title{font-size:17px;font-weight:800;color:#0f172a;line-height:1.25;margin-top:4px;overflow-wrap:anywhere;}',
         '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:3px;}',
         '.pm-answers{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px 4px;margin-bottom:6px;}',
@@ -868,8 +872,10 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         btn.className = 'pm-option'
         btn.textContent = label
         btn.onclick = function () {
+          // Set either way: a patient who answered Yes and came back to change
+          // it to No is still in search mode until told otherwise.
+          self.state.bypassMode = label === 'Yes'
           if (label === 'Yes') {
-            self.state.bypassMode = true
             self.state.offeringsBeforeBypass = self.state.activeOfferings.slice()
             self.state.bypassResumeIndex = self.state.currentQuestionIndex + 1
           }
@@ -1180,7 +1186,9 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     // The results header: a card that sticks to the top while the list scrolls,
     // saying plainly that this is a filtered list and what it was filtered by,
     // followed by the patient's own answers played back to them.
-    buildRecap: function (caseTypeName, locationName, count) {
+    // `matchCount` is how many of them fit the patient's answers; it differs from
+    // `count` only when the patient is searching the whole team.
+    buildRecap: function (caseTypeName, locationName, count, matchCount) {
       var self = this
       var frag = document.createDocumentFragment()
       function el(tag, className, text) {
@@ -1196,27 +1204,35 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var sticky = el('div', 'pm-recap-sticky')
         var card = el('div', 'pm-recap')
         var top = el('div', 'pm-recap-top')
-        top.appendChild(el('span', 'pm-recap-eyebrow', browsing ? 'All providers' : 'Your matches'))
-        top.appendChild(el('span', 'pm-recap-count', count + ' ' + plural))
-        card.appendChild(top)
-        card.appendChild(
-          el(
-            'div',
-            'pm-recap-title',
-            browsing
-              ? 'Search for your provider'
-              : caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : '')
+        if (browsing) {
+          top.appendChild(el('div', 'pm-recap-title', 'Find your provider'))
+          var pills = el('div', 'pm-recap-pills')
+          pills.appendChild(
+            el('span', 'pm-recap-count', matchCount + (matchCount === 1 ? ' match' : ' matches'))
           )
-        )
-        card.appendChild(
-          el(
-            'div',
-            'pm-recap-note',
-            browsing
-              ? 'Providers who treat ' + caseTypeName.toLowerCase() + ' for your case come first. The rest are marked.'
-              : 'Filtered by your answers.'
+          pills.appendChild(el('span', 'pm-recap-count pm-recap-count-total', count + ' ' + plural))
+          top.appendChild(pills)
+          card.appendChild(top)
+          card.appendChild(
+            el(
+              'div',
+              'pm-recap-note',
+              matchCount === 0
+                ? 'No providers match all of your answers. Search to find yours.'
+                : matchCount === 1
+                  ? '1 provider matches your answers and appears first. Search to see if it’s yours.'
+                  : matchCount + ' providers match your answers and appear first. Search to see if yours is one of them.'
+            )
           )
-        )
+        } else {
+          top.appendChild(el('span', 'pm-recap-eyebrow', 'Your matches'))
+          top.appendChild(el('span', 'pm-recap-count', count + ' ' + plural))
+          card.appendChild(top)
+          card.appendChild(
+            el('div', 'pm-recap-title', caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : ''))
+          )
+          card.appendChild(el('div', 'pm-recap-note', 'Filtered by your answers.'))
+        }
         sticky.appendChild(card)
         frag.appendChild(sticky)
       }
@@ -1388,6 +1404,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var pos = positionByProvider[provider.id]
         if (pos) card.setAttribute('data-position', String(pos))
         results.appendChild(card)
+        return card
       }
       var caseTypeName = ''
       var selectedCaseType = (self.data.caseTypes || []).find(function (ct) { return ct.id === self.state.selectedCaseTypeId })
@@ -1402,7 +1419,21 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       // ones who don't match come after, marked, so it is clear why they are
       // there. Analytics still count only the matched providers as shown.
       var unmatched = []
+      // Providers who fit everything but the location the patient picked. They
+      // don't count as matches here; they follow with the other providers,
+      // under the same "not at your selected location" label used elsewhere.
+      var offLocation = []
+      var matched = unique
       if (this.state.bypassMode) {
+        if (this.state.selectedLocationId) {
+          var atSelected = function (item) {
+            return (item.offering.location_ids || []).indexOf(self.state.selectedLocationId) > -1
+          }
+          matched = unique.filter(atSelected)
+          offLocation = unique.filter(function (item) {
+            return !atSelected(item)
+          })
+        }
         var matchedIds = {}
         unique.forEach(function (item) {
           matchedIds[item.provider.id] = true
@@ -1416,7 +1447,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           })
       }
       results.appendChild(
-        this.buildRecap(caseTypeName, selectedLocName, unique.length + unmatched.length)
+        this.buildRecap(caseTypeName, selectedLocName, unique.length + unmatched.length, matched.length)
       )
       if (this.state.bypassMode) {
         var search = document.createElement('input')
@@ -1468,10 +1499,10 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         }
         results.appendChild(helpLink)
         results.appendChild(noSearchMatch)
-        unique.forEach(function (item) {
+        matched.forEach(function (item) {
           appendResultCard(item.provider, false)
         })
-        if (unmatched.length) {
+        if (unmatched.length || offLocation.length) {
           unmatchedWrap = document.createElement('div')
           unmatchedWrap.className = 'pm-outside-section'
           var unmatchedTitle = document.createElement('div')
@@ -1481,27 +1512,23 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           unmatchedIcon.setAttribute('aria-hidden', 'true')
           unmatchedIcon.textContent = '⚠️'
           unmatchedTitle.appendChild(unmatchedIcon)
-          unmatchedTitle.appendChild(document.createTextNode('Other providers'))
+          unmatchedTitle.appendChild(document.createTextNode('Providers outside your requirements'))
           unmatchedWrap.appendChild(unmatchedTitle)
+          // One plain statement for the whole group. It is true for every
+          // provider here whatever ruled them out (the condition, an age limit,
+          // another answer), because it says only that they don't match the
+          // patient's answers.
           var unmatchedSub = document.createElement('div')
           unmatchedSub.className = 'pm-outside-sub'
           unmatchedSub.textContent =
-            (caseTypeName
-              ? "These providers don't treat " + caseTypeName.toLowerCase() + ' for your case. '
-              : "These providers aren't a match for your case. ") +
-            'Call the office to confirm before booking.'
+            "The providers below don't match your requirements based on your answers above."
           unmatchedWrap.appendChild(unmatchedSub)
           results.appendChild(unmatchedWrap)
+          offLocation.forEach(function (item) {
+            unmatchedCards.push(appendResultCard(item.provider, true))
+          })
           unmatched.forEach(function (provider) {
-            // Say what is actually true: they don't treat the condition, or they
-            // do but not for this patient (their age or another answer ruled
-            // them out).
-            var treatsIt = (self.data.offerings || []).some(function (o) {
-              return o.provider_id === provider.id && o.case_type_id === self.state.selectedCaseTypeId
-            })
-            var what = caseTypeName || 'this'
-            var reason = treatsIt ? "Doesn't treat " + what + ' for your case' : "Doesn't treat " + what
-            var card = self.buildCard(provider, false, reason)
+            var card = self.buildCard(provider, false, true)
             unmatchedCards.push(card)
             results.appendChild(card)
           })
@@ -1650,10 +1677,11 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       })
     },
 
-    // `unmatched` is the badge text for a provider shown to a patient who asked
-    // to browse everyone but who isn't one the answers matched. They are marked
-    // with it, and their contact details come from wherever they do practise
-    // rather than from the patient's case type, which they may not treat at all.
+    // `unmatched` marks a provider shown to a patient who asked to browse
+    // everyone but whom the patient's answers didn't match. They are labeled as
+    // not matching, and their contact details come from wherever they do
+    // practise rather than from the patient's case type, which they may not
+    // see at all.
     buildCard: function (provider, outsideArea, unmatched) {
       var self = this
       var config = this.data.config || {}
@@ -1689,7 +1717,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         outsideBadge.className = 'pm-outside-badge'
         outsideBadge.textContent = outsideArea
           ? '📍 Not at your selected location'
-          : '⚠️ ' + unmatched
+          : "⚠️ Doesn't match your requirements"
         card.appendChild(outsideBadge)
       }
 
