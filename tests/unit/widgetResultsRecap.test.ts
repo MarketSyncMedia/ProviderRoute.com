@@ -124,7 +124,7 @@ describe('the results recap card', () => {
     expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Search for your provider')
     expect(card.querySelector('.pm-recap-count')!.textContent).toBe('5 providers')
     expect(card.querySelector('.pm-recap-note')!.textContent).toBe(
-      'Providers who match your answers come first. Anyone who doesn’t is marked.'
+      'Providers who treat elbow for your case come first. The rest are marked.'
     )
     expect(Array.from(body.querySelectorAll('.pm-answer-a')).map((a) => a.textContent)).toEqual(['Elbow', 'Yes'])
   })
@@ -170,13 +170,47 @@ describe('"I already know who I want to see"', () => {
     // Alphabetical, after the matched ones.
     expect(names(body, '.pm-card-outside')).toEqual(['Dr. 4', 'Dr. 5'])
     const heading = results.querySelector('.pm-outside-section')!
-    expect(heading.textContent).toContain('Not matched to your answers')
-    expect(heading.textContent).toContain('may not treat elbow for you')
-    expect(body.querySelectorAll('.pm-card-outside .pm-outside-badge')).toHaveLength(2)
-    expect(body.querySelector('.pm-card-outside .pm-outside-badge')!.textContent).toBe('⚠️ May not match your answers')
+    expect(heading.textContent).toContain('Other providers')
+    expect(heading.textContent).toContain("These providers don't treat elbow for your case.")
+    expect(heading.textContent).toContain('Call the office to confirm before booking.')
+    // States what is true, not a guess at "may not match".
+    expect(heading.textContent).not.toMatch(/may not|might/i)
+    const badges = Array.from(body.querySelectorAll('.pm-card-outside .pm-outside-badge')).map((b) => b.textContent)
+    expect(badges).toEqual(["⚠️ Doesn't treat Elbow", "⚠️ Doesn't treat Elbow"])
 
     const lastMatched = Array.from(results.querySelectorAll('.pm-card:not(.pm-card-outside)')).pop()!
     expect(lastMatched.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('says "for your case" for a provider who treats the condition but was ruled out by an answer', async () => {
+    // Ask the provider question last, after the age, and add an elbow provider who sees children only.
+    const providerQuestion = payload.questions.find((q) => q.id === 'q-provider')!
+    providerQuestion.order_rank = 9
+    payload.providers.push({ id: 'p6', name: 'Dr. 6', category_ids: [], booking_mode: 'default', phone_mode: 'default' })
+    payload.offerings.push({ id: 'o6', provider_id: 'p6', case_type_id: 'elbow', location_ids: ['towson'], constraints: { min_age: 0, max_age: 12 } })
+    try {
+      const { body } = await boot()
+      click(body.querySelector('button.pm-option'))
+      await vi.advanceTimersByTimeAsync(400)
+      ;(body.querySelector('select.pm-select') as HTMLSelectElement).value = 'towson'
+      click(body.querySelector('.pm-next-btn'))
+      await vi.advanceTimersByTimeAsync(400)
+      ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '45'
+      click(body.querySelector('.pm-next-btn'))
+      await vi.advanceTimersByTimeAsync(400)
+      click(option(body, 'Yes'))
+      await vi.advanceTimersByTimeAsync(400)
+
+      const badgeFor = (name: string) =>
+        Array.from(body.querySelectorAll('.pm-card-outside')).find((c) => c.querySelector('.pm-name')!.textContent === name)!.querySelector('.pm-outside-badge')!
+          .textContent
+      expect(badgeFor('Dr. 6')).toBe("⚠️ Doesn't treat Elbow for your case")
+      expect(badgeFor('Dr. 4')).toBe("⚠️ Doesn't treat Elbow")
+    } finally {
+      providerQuestion.order_rank = 1
+      payload.providers.pop()
+      payload.offerings.pop()
+    }
   })
 
   it('gives a marked provider their own contact details, or the main office when they have none', async () => {
@@ -239,7 +273,7 @@ describe('"I already know who I want to see"', () => {
     expect(pm.state.bypassMode).toBe(false)
     expect(results.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
     // The knee-only and no-offering providers are gone, and so is the search.
-    expect(results.textContent).not.toContain('May not match your answers')
+    expect(results.textContent).not.toContain("Doesn't treat")
     expect(Array.from(results.querySelectorAll('.pm-name')).map((n) => n.textContent).sort()).toEqual(['Dr. 1', 'Dr. 2', 'Dr. 3'])
     expect(results.querySelector('input.pm-search')).toBeNull()
   })
