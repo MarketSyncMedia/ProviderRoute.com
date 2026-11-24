@@ -101,7 +101,7 @@ describe('the results recap card', () => {
     expect(card).not.toBeNull()
     expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
     expect(card.querySelector('.pm-recap-count')!.textContent).toBe('3 providers')
-    expect(card.querySelector('.pm-recap-note')!.textContent).toBe('Filtered by your answers — not everyone we have.')
+    expect(card.querySelector('.pm-recap-note')!.textContent).toBe('Filtered by your answers.')
 
     const rows = Array.from(body.querySelectorAll('.pm-answer-row')).map((r) => [
       r.querySelector('.pm-answer-q')!.textContent,
@@ -279,6 +279,113 @@ describe('"I already know who I want to see"', () => {
   })
 })
 
+describe('editing an answer from the results', () => {
+  /** Elbow, then No to "know who", Towson, age 45: the matched results. */
+  async function toMatchedResults() {
+    const booted = await boot()
+    const { body } = booted
+    await startAs(body, 'No')
+    ;(body.querySelector('select.pm-select') as HTMLSelectElement).value = 'towson'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '45'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    return booted
+  }
+  const edit = (body: HTMLElement) => body.querySelector('button.pm-answers-edit') as HTMLButtonElement
+  const changeFor = (body: HTMLElement, question: string) =>
+    Array.from(body.querySelectorAll<HTMLButtonElement>('.pm-answer-row')).find(
+      (r) => r.querySelector('.pm-answer-q')!.textContent === question
+    )!.querySelector('button.pm-answer-return') as HTMLButtonElement
+
+  it('has an Edit button on the panel that turns the Return buttons on, and Done turns them off', async () => {
+    const { body } = await toMatchedResults()
+    const panel = body.querySelector('.pm-answers')!
+    expect(edit(body).textContent).toBe('Edit')
+    expect(panel.classList.contains('pm-answers-editing')).toBe(false)
+    // One Return button per answer, and a note saying where it takes them.
+    const returns = Array.from(panel.querySelectorAll('button.pm-answer-return'))
+    expect(returns).toHaveLength(4)
+    expect(returns.every((b) => b.textContent === '↩ Return')).toBe(true)
+    expect(returns[0].getAttribute('aria-label')).toBe('Return to this point in the questions: What hurts?')
+    expect(panel.querySelector('.pm-answers-note')!.textContent).toBe(
+      'Tap Return to go back to that point in the questions. You’ll carry on from there.'
+    )
+
+    click(edit(body))
+    expect(panel.classList.contains('pm-answers-editing')).toBe(true)
+    expect(edit(body).textContent).toBe('Done')
+    expect(edit(body).getAttribute('aria-expanded')).toBe('true')
+
+    click(edit(body))
+    expect(panel.classList.contains('pm-answers-editing')).toBe(false)
+    expect(edit(body).textContent).toBe('Edit')
+  })
+
+  it('takes the patient back to that question, keeping the answers before it', async () => {
+    const { pm, body } = await toMatchedResults()
+    click(edit(body))
+    click(changeFor(body, 'How old are you?'))
+
+    // Back on the age question, with the earlier answers still in place.
+    expect(body.querySelector('input.pm-number-input')).not.toBeNull()
+    expect(body.querySelector('.pm-results')).toBeNull()
+    expect(pm.state.answers['q-entry']).toBe('elbow')
+    expect(pm.state.answers['q-provider']).toBe('no')
+    expect(pm.state.answers['q-loc']).toBe('towson')
+    // The earlier questions are replayed in the words the patient saw (not ids).
+    expect(body.textContent).toContain('Elbow')
+    expect(body.textContent).not.toMatch(/elbow/)
+
+    // A new answer brings the results back, reflecting it.
+    ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '10'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    const rows = Array.from(body.querySelectorAll('.pm-answer-row')).map((r) => [
+      r.querySelector('.pm-answer-q')!.textContent,
+      r.querySelector('.pm-answer-a')!.textContent,
+    ])
+    expect(rows).toEqual([
+      ['What hurts?', 'Elbow'],
+      ['Do you already know who you want to see?', 'No'],
+      ['Where?', 'Towson'],
+      ['How old are you?', '10'],
+    ])
+  })
+
+  it('drops the answers given after the one being changed, and asks those questions again', async () => {
+    const { pm, body } = await toMatchedResults()
+    click(edit(body))
+    click(changeFor(body, 'Where?'))
+
+    expect(body.querySelector('select.pm-select')).not.toBeNull()
+    expect(pm.state.answers['q-age']).toBeUndefined()
+    expect(pm.state.answers['q-entry']).toBe('elbow')
+
+    ;(body.querySelector('select.pm-select') as HTMLSelectElement).value = 'rosedale'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    // The age is asked again before any results.
+    expect(body.querySelector('input.pm-number-input')).not.toBeNull()
+    expect(body.querySelector('.pm-results')).toBeNull()
+  })
+
+  it('can change the first answer, the condition itself', async () => {
+    const { pm, body } = await toMatchedResults()
+    click(edit(body))
+    click(changeFor(body, 'What hurts?'))
+
+    expect(body.querySelectorAll('button.pm-option').length).toBeGreaterThan(1)
+    expect(pm.state.answers['q-provider']).toBeUndefined()
+    // Pick Knee: the flow starts again from there.
+    click(option(body, 'Knee'))
+    await vi.advanceTimersByTimeAsync(400)
+    expect(pm.state.selectedCaseTypeId).toBe('knee')
+    expect(option(body, 'No')).not.toBeNull()
+  })
+})
+
 describe('getAnswerRows', () => {
   it('uses the admin\'s own yes/no wording, and shows a skipped question as skipped', async () => {
     const { pm } = await boot()
@@ -296,10 +403,10 @@ describe('getAnswerRows', () => {
     }
     pm.state.answers = { 'q-entry': 'elbow', 'q-loc': null, 'q-kid': 'yes', 'q-opt': null }
     expect(widget.getAnswerRows()).toEqual([
-      { question: 'What hurts?', answer: 'Elbow' },
-      { question: 'Where?', answer: 'No preference' },
-      { question: 'Is the patient a child?', answer: 'Yes, treats children' },
-      { question: 'Anything else?', answer: 'Skipped' },
+      { question: 'What hurts?', answer: 'Elbow', index: 0 },
+      { question: 'Where?', answer: 'No preference', index: 2 },
+      { question: 'Is the patient a child?', answer: 'Yes, treats children', index: 4 },
+      { question: 'Anything else?', answer: 'Skipped', index: 5 },
     ])
   })
 })

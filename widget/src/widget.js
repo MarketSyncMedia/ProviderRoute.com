@@ -407,7 +407,14 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-recap-title{font-size:17px;font-weight:800;color:#0f172a;line-height:1.25;margin-top:4px;overflow-wrap:anywhere;}',
         '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:3px;}',
         '.pm-answers{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px 4px;margin-bottom:6px;}',
-        '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#0f172a;margin-bottom:8px;}',
+        '.pm-answers-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}',
+        '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#0f172a;}',
+        '.pm-answers-edit,.pm-answer-return{background:#fff;border:1.5px solid ' + primaryColor + ';color:' + primaryColor + ';border-radius:999px;font-size:11px;font-weight:700;padding:3px 12px;cursor:pointer;font-family:inherit;line-height:1.3;}',
+        '.pm-answers-edit:hover,.pm-answer-return:hover{background:' + primaryColor + ';color:' + brandTextColor + ';}',
+        '.pm-answer-return{display:none;flex-shrink:0;margin-left:auto;align-self:center;}',
+        '.pm-answers-editing .pm-answer-return{display:inline-block;}',
+        '.pm-answers-note{display:none;font-size:12px;line-height:1.4;color:#475569;background:#f8fafc;border-radius:8px;padding:6px 10px;margin-bottom:10px;}',
+        '.pm-answers-editing .pm-answers-note{display:block;}',
         '.pm-answer-row{display:flex;align-items:flex-start;gap:10px;padding-bottom:10px;}',
         '.pm-answer-check{flex-shrink:0;width:18px;height:18px;margin-top:1px;border-radius:50%;background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;line-height:18px;text-align:center;}',
         '.pm-answer-text{min-width:0;}',
@@ -1073,7 +1080,29 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
 
     goBack: function () {
       if (!this.state.history.length) return
-      var last = this.state.history.pop()
+      this.restoreSnapshot(this.state.history.pop())
+    },
+
+    // Jump back to an earlier question to change its answer, keeping every
+    // answer before it. The answer being changed, and any given after it, are
+    // dropped: the later questions are asked again, since what they offer
+    // depends on the answers that came before.
+    goBackTo: function (questionIndex) {
+      var history = this.state.history
+      var found = -1
+      for (var i = history.length - 1; i >= 0; i--) {
+        if (history[i].questionIndex === questionIndex) {
+          found = i
+          break
+        }
+      }
+      if (found < 0) return
+      var snapshot = history[found]
+      history.length = found
+      this.restoreSnapshot(snapshot)
+    },
+
+    restoreSnapshot: function (last) {
       this.state.currentQuestionIndex = last.questionIndex
       this.state.activeOfferings = last.offerings
       this.state.answers = last.answers
@@ -1091,61 +1120,59 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var q = seq[i]
         if (!q) continue
         this.addBubble(q.question_text, false)
-        var ans = last.answers[q.id]
-        if (ans !== undefined && ans !== null) {
-          if (q.question_type === 'location') {
-            var loc = (this.data.locations || []).find(function(l) { return l.id === ans })
-            this.addBubble(loc ? loc.name : 'No preference', true)
-          } else {
-            this.addBubble(String(ans), true)
-          }
+        if (last.answers[q.id] !== undefined) {
+          this.addBubble(this.describeAnswer(q, last.answers[q.id]), true)
         }
       }
       this.renderQuestion()
     },
 
+    // An answer in the words the patient saw on the button they pressed.
+    describeAnswer: function (q, value) {
+      var self = this
+      if (q.question_type === 'location') {
+        if (value === null) return 'No preference'
+        var loc = (self.data.locations || []).find(function (l) {
+          return l.id === value
+        })
+        return loc ? loc.name : String(value)
+      }
+      // An optional question the patient skipped.
+      if (value === null || value === undefined) return 'Skipped'
+      if (q.question_type === 'entry') {
+        var ct = (self.data.caseTypes || []).find(function (c) {
+          return c.id === value
+        })
+        return ct ? ct.name : String(value)
+      }
+      if (q.question_type === 'clinical') {
+        var constraint = self.findConstraint(q.constraint_id)
+        if (constraint && constraint.type === 'binary') {
+          if (value === 'yes') return constraint.yes_label || 'Yes'
+          if (value === 'no') return constraint.no_label || 'No'
+        }
+        return String(value)
+      }
+      if (q.question_type === 'provider') {
+        return value === 'yes' ? 'Yes' : value === 'no' ? 'No' : String(value)
+      }
+      return String(value)
+    },
+
     // Every question the patient has answered so far, in the order asked, as
-    // { question, answer } with the answer in the words they saw on the button.
+    // { question, answer, index } with the answer in the words they saw on the
+    // button and the question's place in the sequence (to jump back to it).
     // Shared by the results recap card and the "no results" screen.
     getAnswerRows: function () {
       var self = this
       var rows = []
-      this.getQuestionSequence().forEach(function (q) {
+      this.getQuestionSequence().forEach(function (q, index) {
         if (!Object.prototype.hasOwnProperty.call(self.state.answers, q.id)) return
-        var value = self.state.answers[q.id]
-        var displayVal = ''
-        if (q.question_type === 'location') {
-          if (value === null) {
-            displayVal = 'No preference'
-          } else {
-            var loc = (self.data.locations || []).find(function (l) {
-              return l.id === value
-            })
-            displayVal = loc ? loc.name : String(value)
-          }
-        } else if (value === null || value === undefined) {
-          // An optional question the patient skipped.
-          displayVal = 'Skipped'
-        } else if (q.question_type === 'entry') {
-          var ct = (self.data.caseTypes || []).find(function (c) {
-            return c.id === value
-          })
-          displayVal = ct ? ct.name : String(value)
-        } else if (q.question_type === 'clinical') {
-          var constraint = self.findConstraint(q.constraint_id)
-          if (constraint && constraint.type === 'binary') {
-            if (value === 'yes') displayVal = constraint.yes_label || 'Yes'
-            else if (value === 'no') displayVal = constraint.no_label || 'No'
-            else displayVal = String(value)
-          } else {
-            displayVal = String(value)
-          }
-        } else if (q.question_type === 'provider') {
-          displayVal = value === 'yes' ? 'Yes' : value === 'no' ? 'No' : String(value)
-        } else {
-          displayVal = String(value)
-        }
-        rows.push({ question: q.question_text || '', answer: displayVal })
+        rows.push({
+          question: q.question_text || '',
+          answer: self.describeAnswer(q, self.state.answers[q.id]),
+          index: index,
+        })
       })
       return rows
     },
@@ -1187,7 +1214,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             'pm-recap-note',
             browsing
               ? 'Providers who treat ' + caseTypeName.toLowerCase() + ' for your case come first. The rest are marked.'
-              : 'Filtered by your answers — not everyone we have.'
+              : 'Filtered by your answers.'
           )
         )
         sticky.appendChild(card)
@@ -1197,7 +1224,29 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       var rows = this.getAnswerRows()
       if (rows.length) {
         var panel = el('div', 'pm-answers')
-        panel.appendChild(el('div', 'pm-answers-title', 'What you told us'))
+        var head = el('div', 'pm-answers-head')
+        head.appendChild(el('div', 'pm-answers-title', 'What you told us'))
+        // Edit turns on a Return button beside each answer, so a patient can fix
+        // one answer without starting the whole thing over. It is worded as a
+        // return because that is what it does: it takes them back to that point
+        // in the questions, and they carry on from there.
+        var editBtn = el('button', 'pm-answers-edit', 'Edit')
+        editBtn.type = 'button'
+        editBtn.setAttribute('aria-expanded', 'false')
+        editBtn.onclick = function () {
+          var editing = panel.classList.toggle('pm-answers-editing')
+          editBtn.textContent = editing ? 'Done' : 'Edit'
+          editBtn.setAttribute('aria-expanded', String(editing))
+        }
+        head.appendChild(editBtn)
+        panel.appendChild(head)
+        panel.appendChild(
+          el(
+            'div',
+            'pm-answers-note',
+            'Tap Return to go back to that point in the questions. You’ll carry on from there.'
+          )
+        )
         rows.forEach(function (r) {
           var row = el('div', 'pm-answer-row')
           row.appendChild(el('span', 'pm-answer-check', '✓'))
@@ -1205,6 +1254,13 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           text.appendChild(el('div', 'pm-answer-q', r.question))
           text.appendChild(el('div', 'pm-answer-a', r.answer))
           row.appendChild(text)
+          var back = el('button', 'pm-answer-return', '↩ Return')
+          back.type = 'button'
+          back.setAttribute('aria-label', 'Return to this point in the questions: ' + r.question)
+          back.onclick = function () {
+            self.goBackTo(r.index)
+          }
+          row.appendChild(back)
           panel.appendChild(row)
         })
         frag.appendChild(panel)
@@ -2112,7 +2168,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     'getQuestionSequence', 'findConstraint', 'renderQuestion', 'renderCaseTypes',
     'renderLocationSelect', 'renderProviderChoice', 'renderBinary', 'renderRange',
     'renderExact', 'handleAnswer', 'goBack', 'showZeroResults', 'showResults',
-    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap',
+    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer',
   ].forEach(function (name) {
     var original = widget[name]
     if (typeof original !== 'function') return
