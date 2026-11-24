@@ -395,27 +395,29 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-select{width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:16px;font-family:inherit;background:white;}',
         '.pm-select:focus{outline:none;border-color:' + primaryColor + ';}',
         '.pm-results{display:flex;flex-direction:column;gap:6px;}',
-        // Sticky results header. Sticky offsets are measured from inside the
-        // body's 16px padding, so top:-17px (with matching negative margins, and 1px
-        // over so no sub-pixel seam shows) puts the strip flush and keeps cards
-        // from showing through above or beside the card while it is stuck.
-        '.pm-recap-sticky{position:sticky;top:-17px;z-index:3;margin:-16px -16px 6px;padding:13px 16px 10px;background:linear-gradient(#fff 82%,rgba(255,255,255,0));}',
+        // Sticky section headers. Sticky offsets are measured from inside the body's
+        // 16px padding, so top:-17px (with matching negative margins, and 1px over
+        // so no sub-pixel seam shows) puts the strip flush and keeps cards from
+        // showing through above or beside the header while it is stuck.
         '.pm-group{display:flex;flex-direction:column;gap:6px;}',
         '.pm-group-head{position:sticky;top:-17px;z-index:3;margin:0 -16px;padding:13px 16px 8px;background:linear-gradient(#fff 85%,rgba(255,255,255,0));}',
-        '.pm-group-head .pm-outside-section{margin-top:0;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
-        '.pm-matches-head{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#f8fafc;background:color-mix(in srgb,' + primaryColor + ' 7%,#fff);border:1px solid #e2e8f0;border-color:color-mix(in srgb,' + primaryColor + ' 28%,#fff);border-left:5px solid ' + primaryColor + ';border-radius:12px;padding:10px 14px;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
-        '.pm-matches-title{font-size:16px;font-weight:800;color:#0f172a;line-height:1.25;overflow-wrap:anywhere;}',
-        '.pm-reasons{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}',
-        '.pm-reason{background:#fff;border:1px solid #fcd34d;color:#92400e;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;}',
+        '.pm-notice{background:#fef3c7;border-radius:8px;overflow:hidden;margin-bottom:12px;}',
+        '.pm-notice .pm-outside-badge{display:block;border-radius:0;margin:0;padding:5px 10px;}',
+        '.pm-reasons{list-style:none;padding:7px 10px 8px;display:flex;flex-direction:column;gap:4px;}',
+        '.pm-reason{position:relative;padding-left:16px;color:#78350f;font-size:12px;font-weight:600;line-height:1.35;}',
+        '.pm-reason::before{content:"\\2715";position:absolute;left:1px;top:0;font-size:10px;line-height:16px;color:#b45309;}',
         '.pm-recap{background:#f8fafc;background:color-mix(in srgb,' + primaryColor + ' 7%,#fff);border:1px solid #e2e8f0;border-color:color-mix(in srgb,' + primaryColor + ' 28%,#fff);border-left:5px solid ' + primaryColor + ';border-radius:12px;padding:10px 14px 11px;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
         '.pm-recap-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;}',
         '.pm-recap-eyebrow{font-size:10px;font-weight:800;letter-spacing:0.09em;text-transform:uppercase;color:' + primaryColor + ';}',
         '.pm-recap-count{background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;}',
-        '.pm-recap-top .pm-recap-title{margin-top:0;font-size:16px;white-space:nowrap;}',
+        '.pm-recap-top .pm-recap-title{margin-top:0;white-space:nowrap;}',
         '.pm-recap-pills{display:flex;gap:4px;margin-left:auto;}',
         '.pm-recap-pills .pm-recap-count{font-size:10px;padding:3px 7px;}',
         '.pm-recap-pills .pm-recap-count-total{background:#fff;color:#334155;box-shadow:inset 0 0 0 1px #cbd5e1;}',
-        '.pm-recap-title{font-size:17px;font-weight:800;color:#0f172a;line-height:1.25;margin-top:4px;overflow-wrap:anywhere;}',
+        '.pm-recap-title{font-size:16px;font-weight:800;color:#0f172a;line-height:1.25;margin-top:4px;overflow-wrap:anywhere;}',
+        '.pm-recap-outside{background:#fffbeb;border-color:#fde68a;border-left-color:#d97706;}',
+        '.pm-recap-outside .pm-recap-eyebrow{color:#92400e;}',
+        '.pm-recap-outside .pm-recap-count{background:#92400e;color:#fff;}',
         '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:3px;}',
         '.pm-answers{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px 4px;margin-bottom:6px;}',
         '.pm-answers-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}',
@@ -436,10 +438,6 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-card{display:flex;flex-direction:column;background:#f8fafc;border-radius:12px;padding:12px;gap:0;}',
         '.pm-card-outside{background:#fffbeb;border:1px solid #fde68a;}',
         '.pm-outside-badge{display:inline-block;background:#f59e0b;color:#000;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;padding:3px 8px;border-radius:6px;margin-bottom:8px;}',
-        '.pm-outside-section{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 10px 2px;margin-top:8px;}',
-        '.pm-outside-title{display:flex;align-items:center;gap:6px;font-weight:700;font-size:12px;color:#92400e;text-transform:uppercase;letter-spacing:0.04em;}',
-        '.pm-outside-icon{font-size:13px;}',
-        '.pm-outside-sub{font-size:12px;color:#92400e;opacity:0.9;padding:4px 0 8px;line-height:1.4;}',
         '.pm-avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;}',
         '.pm-info{flex:1;min-width:0;}',
         '.pm-name{font-weight:600;font-size:14px;color:#1e293b;}',
@@ -1190,12 +1188,58 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       return rows
     },
 
-    // The results header: a card that sticks to the top while the list scrolls,
-    // saying plainly that this is a filtered list and what it was filtered by,
-    // followed by the patient's own answers played back to them.
-    // `matchCount` is how many of them fit the patient's answers; it differs from
-    // `count` only when the patient is searching the whole team.
+    // The card that heads a section of the results. Every section uses this one
+    // card, so they read as a set when one takes over from another. `outside`
+    // gives it the amber of the providers it heads.
+    sectionCard: function (opts) {
+      function el(tag, className, text) {
+        var node = document.createElement(tag)
+        node.className = className
+        if (text !== undefined) node.textContent = text
+        return node
+      }
+      var card = el('div', opts.outside ? 'pm-recap pm-recap-outside' : 'pm-recap')
+      var top = el('div', 'pm-recap-top')
+      var pills = el('div', 'pm-recap-pills')
+      opts.pills.forEach(function (text, i) {
+        pills.appendChild(el('span', i ? 'pm-recap-count pm-recap-count-total' : 'pm-recap-count', text))
+      })
+      var title = el('div', 'pm-recap-title', opts.title)
+      top.appendChild(opts.eyebrow ? el('span', 'pm-recap-eyebrow', opts.eyebrow) : title)
+      top.appendChild(pills)
+      card.appendChild(top)
+      if (opts.eyebrow) card.appendChild(title)
+      card.appendChild(el('div', 'pm-recap-note', opts.note))
+      return card
+    },
+
+    // Heads the matches: what this list is and how many are in it. `matchCount`
+    // is how many fit the patient's answers; it differs from `count` only when
+    // the patient is searching the whole team.
     buildRecap: function (caseTypeName, locationName, count, matchCount) {
+      var total = count + (count === 1 ? ' provider' : ' providers')
+      if (this.state.bypassMode) {
+        return this.sectionCard({
+          title: 'Find your provider',
+          pills: [matchCount + (matchCount === 1 ? ' match' : ' matches'), total],
+          note:
+            matchCount === 0
+              ? 'No providers match all of your answers. Search to find yours.'
+              : matchCount === 1
+                ? '1 provider matches your answers and appears first. Search to see if it’s yours.'
+                : matchCount + ' providers match your answers and appear first. Search to see if yours is one of them.',
+        })
+      }
+      return this.sectionCard({
+        eyebrow: 'Your matches',
+        title: (caseTypeName ? caseTypeName + ' specialists' : 'Specialists') + (locationName ? ' · ' + locationName : ''),
+        pills: [total],
+        note: 'Filtered by your answers.',
+      })
+    },
+
+    // The patient's own answers played back to them, first thing on the results.
+    buildAnswers: function () {
       var self = this
       var frag = document.createDocumentFragment()
       function el(tag, className, text) {
@@ -1204,46 +1248,6 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         if (text !== undefined) node.textContent = text
         return node
       }
-      var plural = count === 1 ? 'provider' : 'providers'
-
-      if (caseTypeName) {
-        var browsing = this.state.bypassMode
-        var sticky = el('div', 'pm-recap-sticky')
-        var card = el('div', 'pm-recap')
-        var top = el('div', 'pm-recap-top')
-        if (browsing) {
-          top.appendChild(el('div', 'pm-recap-title', 'Find your provider'))
-          var pills = el('div', 'pm-recap-pills')
-          pills.appendChild(
-            el('span', 'pm-recap-count', matchCount + (matchCount === 1 ? ' match' : ' matches'))
-          )
-          pills.appendChild(el('span', 'pm-recap-count pm-recap-count-total', count + ' ' + plural))
-          top.appendChild(pills)
-          card.appendChild(top)
-          card.appendChild(
-            el(
-              'div',
-              'pm-recap-note',
-              matchCount === 0
-                ? 'No providers match all of your answers. Search to find yours.'
-                : matchCount === 1
-                  ? '1 provider matches your answers and appears first. Search to see if it’s yours.'
-                  : matchCount + ' providers match your answers and appear first. Search to see if yours is one of them.'
-            )
-          )
-        } else {
-          top.appendChild(el('span', 'pm-recap-eyebrow', 'Your matches'))
-          top.appendChild(el('span', 'pm-recap-count', count + ' ' + plural))
-          card.appendChild(top)
-          card.appendChild(
-            el('div', 'pm-recap-title', caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : ''))
-          )
-          card.appendChild(el('div', 'pm-recap-note', 'Filtered by your answers.'))
-        }
-        sticky.appendChild(card)
-        frag.appendChild(sticky)
-      }
-
       var rows = this.getAnswerRows()
       if (rows.length) {
         var panel = el('div', 'pm-answers')
@@ -1427,37 +1431,6 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         results.appendChild(group)
         return group
       }
-      function matchesHeader(title, count) {
-        var header = document.createElement('div')
-        header.className = 'pm-matches-head'
-        var label = document.createElement('div')
-        label.className = 'pm-matches-title'
-        label.textContent = title
-        header.appendChild(label)
-        var pill = document.createElement('span')
-        pill.className = 'pm-recap-count'
-        pill.textContent = count + (count === 1 ? ' provider' : ' providers')
-        header.appendChild(pill)
-        return header
-      }
-      function outsideHeader(titleText, subText) {
-        var header = document.createElement('div')
-        header.className = 'pm-outside-section'
-        var title = document.createElement('div')
-        title.className = 'pm-outside-title'
-        var icon = document.createElement('span')
-        icon.className = 'pm-outside-icon'
-        icon.setAttribute('aria-hidden', 'true')
-        icon.textContent = '⚠️'
-        title.appendChild(icon)
-        title.appendChild(document.createTextNode(titleText))
-        header.appendChild(title)
-        var sub = document.createElement('div')
-        sub.className = 'pm-outside-sub'
-        sub.textContent = subText
-        header.appendChild(sub)
-        return header
-      }
       var caseTypeName = ''
       var selectedCaseType = (self.data.caseTypes || []).find(function (ct) { return ct.id === self.state.selectedCaseTypeId })
       if (selectedCaseType) caseTypeName = selectedCaseType.name
@@ -1497,8 +1470,8 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             return String(a.name).localeCompare(String(b.name))
           })
       }
-      var top = appendGroup(null)
-      top.appendChild(
+      appendGroup(null).appendChild(this.buildAnswers())
+      var matches = appendGroup(
         this.buildRecap(
           caseTypeName,
           selectedLocName,
@@ -1506,34 +1479,39 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           matched.length
         )
       )
+      function providerCount(n) {
+        return n + (n === 1 ? ' provider' : ' providers')
+      }
       if (this.state.bypassMode) {
         var search = document.createElement('input')
         search.className = 'pm-search'
         search.placeholder = 'Search by provider name...'
         search.setAttribute('aria-label', 'Search by provider name')
-        var cardGroups = []
+        var others = null
         var noSearchMatch = document.createElement('div')
         noSearchMatch.style.cssText = 'font-size:13px;color:#64748b;padding:8px 0;display:none;'
         noSearchMatch.textContent = 'No provider by that name. Try a different spelling.'
         search.oninput = function () {
           var q = search.value.toLowerCase()
           var anyShown = false
-          cardGroups.forEach(function (group) {
-            var groupShown = false
-            group.querySelectorAll('.pm-card').forEach(function (card) {
-              var name = card.querySelector('.pm-name')
-              if (!name) return
-              var show = name.textContent.toLowerCase().indexOf(q) > -1
-              card.style.display = show ? '' : 'none'
-              if (show) groupShown = true
-            })
-            // Don't leave a header hanging over nothing.
-            group.style.display = groupShown ? '' : 'none'
-            if (groupShown) anyShown = true
+          results.querySelectorAll('.pm-card').forEach(function (card) {
+            var name = card.querySelector('.pm-name')
+            if (!name) return
+            var show = name.textContent.toLowerCase().indexOf(q) > -1
+            card.style.display = show ? '' : 'none'
+            if (show) anyShown = true
           })
+          // Don't leave the outside header hanging over nothing. The matches
+          // group always stays: the search box is in it.
+          if (others) {
+            var othersShown = Array.from(others.querySelectorAll('.pm-card')).some(function (card) {
+              return card.style.display !== 'none'
+            })
+            others.style.display = othersShown ? '' : 'none'
+          }
           noSearchMatch.style.display = anyShown ? 'none' : ''
         }
-        top.appendChild(search)
+        matches.appendChild(search)
         var helpLink = document.createElement('div')
         helpLink.className = 'pm-help'
         helpLink.textContent = 'Help me choose instead'
@@ -1552,23 +1530,21 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           self.state.bypassResumeIndex = null
           self.renderQuestion()
         }
-        top.appendChild(helpLink)
-        top.appendChild(noSearchMatch)
-        if (matched.length) {
-          var found = appendGroup(matchesHeader('Matches', matched.length))
-          cardGroups.push(found)
-          matched.forEach(function (item) {
-            appendResultCard(found, item.provider, false)
-          })
-        }
+        matches.appendChild(helpLink)
+        matches.appendChild(noSearchMatch)
+        matched.forEach(function (item) {
+          appendResultCard(matches, item.provider, false)
+        })
         if (unmatched.length || offLocation.length) {
-          var others = appendGroup(
-            outsideHeader(
-              'Providers outside your requirements',
-              "The providers below don't match your requirements based on your answers above."
-            )
+          others = appendGroup(
+            this.sectionCard({
+              outside: true,
+              eyebrow: 'Other providers',
+              title: 'Providers outside your requirements',
+              pills: [providerCount(unmatched.length + offLocation.length)],
+              note: "The providers below don't match your requirements based on your answers above.",
+            })
           )
-          cardGroups.push(others)
           offLocation.forEach(function (item) {
             appendResultCard(others, item.provider, true, self.mismatchReasons(item.provider))
           })
@@ -1577,9 +1553,6 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           })
         }
       } else {
-        var matches = appendGroup(
-          matchesHeader(selectedLocName ? 'Matches at ' + selectedLocName : 'Matches', matched.length)
-        )
         if (!matched.length) {
           var noMatch = document.createElement('div')
           noMatch.style.cssText = 'font-size:13px;color:#64748b;padding:8px 0;'
@@ -1593,10 +1566,13 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         // turn it off if they'd rather only ever show in-location matches.
         if (offLocation.length && config.show_worth_the_drive !== false) {
           var elsewhere = appendGroup(
-            outsideHeader(
-              'Not at ' + selectedLocName,
-              'These providers treat this, but not at ' + selectedLocName + ' — only at another location.'
-            )
+            this.sectionCard({
+              outside: true,
+              eyebrow: 'Other locations',
+              title: 'Not at ' + selectedLocName,
+              pills: [providerCount(offLocation.length)],
+              note: 'These providers treat this, but not at ' + selectedLocName + ' — only at another location.',
+            })
           )
           offLocation.forEach(function (item) {
             appendResultCard(elsewhere, item.provider, true)
@@ -1782,17 +1758,23 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         outsideBadge.textContent = reasons
           ? "⚠️ Doesn't match your requirements"
           : '📍 Not at your selected location'
-        card.appendChild(outsideBadge)
         if (reasons && reasons.length) {
-          var reasonTags = document.createElement('div')
-          reasonTags.className = 'pm-reasons'
+          // One notice: the flag, with its reasons listed inside it.
+          var notice = document.createElement('div')
+          notice.className = 'pm-notice'
+          notice.appendChild(outsideBadge)
+          var list = document.createElement('ul')
+          list.className = 'pm-reasons'
           reasons.forEach(function (reason) {
-            var tag = document.createElement('span')
-            tag.className = 'pm-reason'
-            tag.textContent = reason
-            reasonTags.appendChild(tag)
+            var row = document.createElement('li')
+            row.className = 'pm-reason'
+            row.textContent = reason
+            list.appendChild(row)
           })
-          card.appendChild(reasonTags)
+          notice.appendChild(list)
+          card.appendChild(notice)
+        } else {
+          card.appendChild(outsideBadge)
         }
       }
 
@@ -2271,7 +2253,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     'getQuestionSequence', 'findConstraint', 'renderQuestion', 'renderCaseTypes',
     'renderLocationSelect', 'renderProviderChoice', 'renderBinary', 'renderRange',
     'renderExact', 'handleAnswer', 'goBack', 'showZeroResults', 'showResults',
-    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer', 'mismatchReasons',
+    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer', 'mismatchReasons', 'buildAnswers', 'sectionCard',
   ].forEach(function (name) {
     var original = widget[name]
     if (typeof original !== 'function') return
