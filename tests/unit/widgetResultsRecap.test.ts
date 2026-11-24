@@ -63,7 +63,7 @@ const click = (el: Element | null) => (el as HTMLButtonElement).click()
 const option = (body: HTMLElement, text: string) =>
   Array.from(body.querySelectorAll<HTMLButtonElement>('button.pm-option')).find((b) => b.textContent === text) ?? null
 
-const pills = (body: HTMLElement) => Array.from(body.querySelectorAll('.pm-recap .pm-recap-count')).map((p) => p.textContent)
+const pills = (body: HTMLElement) => Array.from(body.querySelectorAll('.pm-recap:not(.pm-recap-outside) .pm-recap-count')).map((p) => p.textContent)
 
 const tags = (card: Element) => Array.from(card.querySelectorAll('.pm-reason')).map((t) => t.textContent)
 
@@ -138,8 +138,11 @@ describe('the results recap card', () => {
     await startAs(body, 'Yes')
 
     const results = body.querySelector('.pm-results')!
-    const sticky = results.querySelector('.pm-recap-sticky')!
-    expect(results.firstElementChild!.firstElementChild).toBe(sticky)
+    const sticky = results.querySelector('.pm-group-head')!
+    // The patient's answers come first and scroll away; the card then heads the matches.
+    expect(results.firstElementChild!.querySelector('.pm-answers')).not.toBeNull()
+    expect(results.firstElementChild!.querySelector('.pm-group-head')).toBeNull()
+    expect(results.children[1].firstElementChild).toBe(sticky)
     expect(sticky.querySelector('.pm-recap')).not.toBeNull()
     // The sticky strip comes before the first provider card.
     const firstCard = results.querySelector('.pm-card')!
@@ -176,7 +179,7 @@ describe('"I already know who I want to see"', () => {
     expect(plain.sort()).toEqual(['Dr. 1', 'Dr. 2', 'Dr. 3'])
     // Alphabetical, after the matched ones.
     expect(names(body, '.pm-card-outside')).toEqual(['Dr. 4', 'Dr. 5'])
-    const heading = results.querySelector('.pm-outside-section')!
+    const heading = results.querySelector('.pm-recap-outside')!
     expect(heading.textContent).toContain('Providers outside your requirements')
     expect(heading.textContent).toContain(
       "The providers below don't match your requirements based on your answers above."
@@ -247,8 +250,8 @@ describe('"I already know who I want to see"', () => {
     const { body } = await boot()
     await startAs(body, 'Yes')
     const search = body.querySelector('input.pm-search') as HTMLInputElement
-    const heading = body.querySelector('.pm-outside-section')!.closest('.pm-group') as HTMLElement
-    const matches = body.querySelector('.pm-matches-head')!.closest('.pm-group') as HTMLElement
+    const heading = body.querySelector('.pm-recap-outside')!.closest('.pm-group') as HTMLElement
+    const matches = search.closest('.pm-group') as HTMLElement
     const visible = () =>
       Array.from(body.querySelectorAll<HTMLElement>('.pm-card'))
         .filter((c) => c.style.display !== 'none')
@@ -261,7 +264,9 @@ describe('"I already know who I want to see"', () => {
     type('dr. 5')
     expect(visible()).toEqual(['Dr. 5'])
     expect(heading.style.display).toBe('')
-    expect(matches.style.display).toBe('none')
+    // The search box lives with the matches, so that group never disappears from under it.
+    expect(matches.style.display).toBe('')
+    expect(matches).not.toBe(heading)
 
     type('dr. 1')
     expect(visible()).toEqual(['Dr. 1'])
@@ -304,7 +309,7 @@ describe('section headers that take over as the list scrolls', () => {
   /** Each group's sticky header, and the names of the providers inside that group. */
   const groups = (body: HTMLElement) =>
     Array.from(body.querySelectorAll('.pm-results > .pm-group')).map((g) => [
-      g.querySelector('.pm-recap-title, .pm-matches-title, .pm-outside-title')!.textContent,
+      g.querySelector('.pm-recap-title, .pm-answers-title')!.textContent,
       Array.from(g.querySelectorAll('.pm-name')).map((n) => n.textContent).sort(),
     ])
   async function answerTowsonAge45(body: HTMLElement) {
@@ -316,26 +321,27 @@ describe('section headers that take over as the list scrolls', () => {
     await vi.advanceTimersByTimeAsync(400)
   }
 
-  it('gives the search its recap, Matches and outside groups, in that order', async () => {
+  it('gives the search its answers, then the matches card, then the outside card', async () => {
     const { body } = await boot()
     await startAs(body, 'Yes')
     expect(groups(body)).toEqual([
-      ['Find your provider', []],
-      ['Matches', ['Dr. 1', 'Dr. 2', 'Dr. 3']],
-      ['⚠️Providers outside your requirements', ['Dr. 4', 'Dr. 5']],
+      ['What you told us', []],
+      ['Find your provider', ['Dr. 1', 'Dr. 2', 'Dr. 3']],
+      ['Providers outside your requirements', ['Dr. 4', 'Dr. 5']],
     ])
-    expect(body.querySelector('.pm-matches-head .pm-recap-count')!.textContent).toBe('3 providers')
+    expect(body.querySelector('.pm-recap-outside .pm-recap-count')!.textContent).toBe('2 providers')
   })
 
-  it('gives Help me choose the same: recap, Matches at the location, then not at it', async () => {
+  it('gives Help me choose the same: answers, the matches card, then not at the location', async () => {
     const { body } = await boot()
     await startAs(body, 'No')
     await answerTowsonAge45(body)
     expect(groups(body)).toEqual([
-      ['Elbow specialists · Towson', []],
-      ['Matches at Towson', ['Dr. 1', 'Dr. 3']],
-      ['⚠️Not at Towson', ['Dr. 2']],
+      ['What you told us', []],
+      ['Elbow specialists · Towson', ['Dr. 1', 'Dr. 3']],
+      ['Not at Towson', ['Dr. 2']],
     ])
+    expect(body.querySelector('.pm-recap-outside .pm-recap-count')!.textContent).toBe('1 provider')
     // Its own cards keep the location label; the flag and tags are the search's.
     expect(body.querySelector('.pm-card-outside .pm-outside-badge')!.textContent).toBe('📍 Not at your selected location')
     expect(body.querySelector('.pm-reason')).toBeNull()
