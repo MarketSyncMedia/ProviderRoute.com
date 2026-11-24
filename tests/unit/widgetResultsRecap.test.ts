@@ -14,11 +14,12 @@ type WidgetApi = {
 }
 
 const payload = {
-  config: { allowed_domains: ['localhost'], embed_mode: 'floating', primary_color: '#4F46E5' },
+  config: { allowed_domains: ['localhost'], embed_mode: 'floating', primary_color: '#4F46E5', fallback_phone: '4105550100' },
   offerings: [
     { id: 'o1', provider_id: 'p1', case_type_id: 'elbow', location_ids: ['towson'], constraints: { min_age: 0, max_age: 99 } },
     { id: 'o2', provider_id: 'p2', case_type_id: 'elbow', location_ids: ['rosedale'], constraints: { min_age: 0, max_age: 99 } },
     { id: 'o3', provider_id: 'p3', case_type_id: 'elbow', location_ids: ['towson'], constraints: { min_age: 0, max_age: 99 } },
+    { id: 'o4', provider_id: 'p4', case_type_id: 'knee', location_ids: ['rosedale'], constraints: { min_age: 0, max_age: 99 } },
   ],
   constraints: [
     { id: 'c-age', type: 'range', mapped_key: 'min_age', secondary_mapped_key: 'max_age' },
@@ -30,13 +31,17 @@ const payload = {
     { id: 'q-loc', question_type: 'location', question_text: 'Where?', order_rank: 2, required: true, system_config: {} },
     { id: 'q-age', question_type: 'clinical', constraint_id: 'c-age', question_text: 'How old are you?', order_rank: 3, required: true },
   ],
-  caseTypes: [{ id: 'elbow', name: 'Elbow', map_tag: null }],
+  caseTypes: [
+    { id: 'elbow', name: 'Elbow', map_tag: null },
+    { id: 'knee', name: 'Knee', map_tag: null },
+  ],
   locations: [
     { id: 'towson', name: 'Towson' },
     { id: 'rosedale', name: 'Rosedale' },
   ],
-  providers: [1, 2, 3].map((n) => ({ id: `p${n}`, name: `Dr. ${n}`, category_ids: [], booking_mode: 'default', phone_mode: 'default' })),
-  providerLocations: [],
+  // p1-p3 treat elbow. p4 treats only knee, p5 has no live offering at all.
+  providers: [1, 2, 3, 4, 5].map((n) => ({ id: `p${n}`, name: `Dr. ${n}`, category_ids: [], booking_mode: 'default', phone_mode: 'default' })),
+  providerLocations: [{ provider_id: 'p4', location_id: 'rosedale', booking_link: null, self_schedule_link: null, phone: '4105550144' }],
   categories: [],
 }
 
@@ -110,14 +115,16 @@ describe('the results recap card', () => {
     ])
   })
 
-  it('says outright that "I know who I want" shows every provider for the condition', async () => {
+  it('says outright that "I know who I want" is a search of everyone', async () => {
     const { body } = await boot()
     await startAs(body, 'Yes')
 
     const card = body.querySelector('.pm-recap')!
-    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists')
+    expect(card.querySelector('.pm-recap-eyebrow')!.textContent).toBe('All providers')
+    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Search for your provider')
+    expect(card.querySelector('.pm-recap-count')!.textContent).toBe('5 providers')
     expect(card.querySelector('.pm-recap-note')!.textContent).toBe(
-      'Everyone who treats elbow — not filtered by your answers.'
+      'Providers who match your answers come first. Anyone who doesn’t is marked.'
     )
     expect(Array.from(body.querySelectorAll('.pm-answer-a')).map((a) => a.textContent)).toEqual(['Elbow', 'Yes'])
   })
@@ -136,14 +143,105 @@ describe('the results recap card', () => {
   })
 
   it('says "1 provider", not "1 providers"', async () => {
-    const original = payload.offerings.splice(1)
+    const offerings = payload.offerings.splice(1)
+    const providers = payload.providers.splice(1)
     try {
       const { body } = await boot()
       await startAs(body, 'Yes')
       expect(body.querySelector('.pm-recap-count')!.textContent).toBe('1 provider')
     } finally {
-      payload.offerings.push(...original)
+      payload.offerings.push(...offerings)
+      payload.providers.push(...providers)
     }
+  })
+})
+
+describe('"I already know who I want to see"', () => {
+  const names = (body: HTMLElement, selector: string) =>
+    Array.from(body.querySelectorAll(selector)).map((c) => c.querySelector('.pm-name')!.textContent)
+
+  it('lists the matched providers first, then everyone else, marked', async () => {
+    const { body } = await boot()
+    await startAs(body, 'Yes')
+
+    const results = body.querySelector('.pm-results')!
+    const plain = names(body, '.pm-card:not(.pm-card-outside)')
+    expect(plain.sort()).toEqual(['Dr. 1', 'Dr. 2', 'Dr. 3'])
+    // Alphabetical, after the matched ones.
+    expect(names(body, '.pm-card-outside')).toEqual(['Dr. 4', 'Dr. 5'])
+    const heading = results.querySelector('.pm-outside-section')!
+    expect(heading.textContent).toContain('Not matched to your answers')
+    expect(heading.textContent).toContain('may not treat elbow for you')
+    expect(body.querySelectorAll('.pm-card-outside .pm-outside-badge')).toHaveLength(2)
+    expect(body.querySelector('.pm-card-outside .pm-outside-badge')!.textContent).toBe('⚠️ May not match your answers')
+
+    const lastMatched = Array.from(results.querySelectorAll('.pm-card:not(.pm-card-outside)')).pop()!
+    expect(lastMatched.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('gives a marked provider their own contact details, or the main office when they have none', async () => {
+    const { body } = await boot()
+    await startAs(body, 'Yes')
+
+    const [knee, none] = Array.from(body.querySelectorAll('.pm-card-outside'))
+    // p4 treats knee, not elbow: still reachable at the number saved for where they practise.
+    expect(knee.querySelector('a.pm-call')!.getAttribute('href')).toBe('tel:4105550144')
+    // p5 has nothing of their own, so the office number stands in.
+    expect(none.querySelector('a.pm-call')!.getAttribute('href')).toBe('tel:4105550100')
+  })
+
+  it('searches the whole list, hiding the "not matched" heading when none of it is left', async () => {
+    const { body } = await boot()
+    await startAs(body, 'Yes')
+    const search = body.querySelector('input.pm-search') as HTMLInputElement
+    const heading = body.querySelector('.pm-outside-section') as HTMLElement
+    const visible = () =>
+      Array.from(body.querySelectorAll<HTMLElement>('.pm-card'))
+        .filter((c) => c.style.display !== 'none')
+        .map((c) => c.querySelector('.pm-name')!.textContent)
+    const type = (value: string) => {
+      search.value = value
+      search.dispatchEvent(new Event('input'))
+    }
+
+    type('dr. 5')
+    expect(visible()).toEqual(['Dr. 5'])
+    expect(heading.style.display).toBe('')
+
+    type('dr. 1')
+    expect(visible()).toEqual(['Dr. 1'])
+    expect(heading.style.display).toBe('none')
+
+    type('nobody')
+    expect(visible()).toEqual([])
+    expect(body.textContent).toContain('No provider by that name')
+
+    type('')
+    expect(visible()).toHaveLength(5)
+    expect(heading.style.display).toBe('')
+  })
+
+  it('leaves "Help me choose instead" to finish the questions and show only the filtered list', async () => {
+    const { pm, body } = await boot()
+    await startAs(body, 'Yes')
+    expect(body.querySelector('.pm-card-outside')).not.toBeNull()
+
+    click(body.querySelector('.pm-help'))
+    await vi.advanceTimersByTimeAsync(400)
+    ;(body.querySelector('select.pm-select') as HTMLSelectElement).value = 'towson'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '45'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+
+    const results = body.querySelector('.pm-results')!
+    expect(pm.state.bypassMode).toBe(false)
+    expect(results.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
+    // The knee-only and no-offering providers are gone, and so is the search.
+    expect(results.textContent).not.toContain('May not match your answers')
+    expect(Array.from(results.querySelectorAll('.pm-name')).map((n) => n.textContent).sort()).toEqual(['Dr. 1', 'Dr. 2', 'Dr. 3'])
+    expect(results.querySelector('input.pm-search')).toBeNull()
   })
 })
 

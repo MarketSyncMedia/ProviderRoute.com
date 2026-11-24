@@ -407,7 +407,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-recap-title{font-size:17px;font-weight:800;color:#0f172a;line-height:1.25;margin-top:4px;overflow-wrap:anywhere;}',
         '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:3px;}',
         '.pm-answers{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px 4px;margin-bottom:6px;}',
-        '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#64748b;margin-bottom:8px;}',
+        '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#0f172a;margin-bottom:8px;}',
         '.pm-answer-row{display:flex;align-items:flex-start;gap:10px;padding-bottom:10px;}',
         '.pm-answer-check{flex-shrink:0;width:18px;height:18px;margin-top:1px;border-radius:50%;background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;line-height:18px;text-align:center;}',
         '.pm-answer-text{min-width:0;}',
@@ -1165,21 +1165,28 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       var plural = count === 1 ? 'provider' : 'providers'
 
       if (caseTypeName) {
+        var browsing = this.state.bypassMode
         var sticky = el('div', 'pm-recap-sticky')
         var card = el('div', 'pm-recap')
         var top = el('div', 'pm-recap-top')
-        top.appendChild(el('span', 'pm-recap-eyebrow', 'Your matches'))
+        top.appendChild(el('span', 'pm-recap-eyebrow', browsing ? 'All providers' : 'Your matches'))
         top.appendChild(el('span', 'pm-recap-count', count + ' ' + plural))
         card.appendChild(top)
         card.appendChild(
-          el('div', 'pm-recap-title', caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : ''))
+          el(
+            'div',
+            'pm-recap-title',
+            browsing
+              ? 'Search for your provider'
+              : caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : '')
+          )
         )
         card.appendChild(
           el(
             'div',
             'pm-recap-note',
-            this.state.bypassMode
-              ? 'Everyone who treats ' + caseTypeName.toLowerCase() + ' — not filtered by your answers.'
+            browsing
+              ? 'Providers who match your answers come first. Anyone who doesn’t is marked.'
               : 'Filtered by your answers — not everyone we have.'
           )
         )
@@ -1334,25 +1341,57 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var selectedLocForHeader = (self.data.locations || []).find(function (l) { return l.id === self.state.selectedLocationId })
         if (selectedLocForHeader) selectedLocName = selectedLocForHeader.name
       }
-      results.appendChild(this.buildRecap(caseTypeName, selectedLocName, unique.length))
+      // A patient who already knows who they want to see gets the whole
+      // directory to search, not just the providers their answers matched. The
+      // ones who don't match come after, marked, so it is clear why they are
+      // there. Analytics still count only the matched providers as shown.
+      var unmatched = []
+      if (this.state.bypassMode) {
+        var matchedIds = {}
+        unique.forEach(function (item) {
+          matchedIds[item.provider.id] = true
+        })
+        unmatched = (self.data.providers || [])
+          .filter(function (p) {
+            return !matchedIds[p.id]
+          })
+          .sort(function (a, b) {
+            return String(a.name).localeCompare(String(b.name))
+          })
+      }
+      results.appendChild(
+        this.buildRecap(caseTypeName, selectedLocName, unique.length + unmatched.length)
+      )
       if (this.state.bypassMode) {
         var search = document.createElement('input')
         search.className = 'pm-search'
         search.placeholder = 'Search by provider name...'
         search.setAttribute('aria-label', 'Search by provider name')
+        var unmatchedWrap = null
+        var unmatchedCards = []
+        var noSearchMatch = document.createElement('div')
+        noSearchMatch.style.cssText = 'font-size:13px;color:#64748b;padding:8px 0;display:none;'
+        noSearchMatch.textContent = 'No provider by that name. Try a different spelling.'
         search.oninput = function () {
           var q = search.value.toLowerCase()
+          var anyShown = false
           results.querySelectorAll('.pm-card').forEach(function (card) {
             var name = card.querySelector('.pm-name')
-            if (name)
-              card.style.display = name.textContent.toLowerCase().indexOf(q) > -1 ? '' : 'none'
+            if (!name) return
+            var show = name.textContent.toLowerCase().indexOf(q) > -1
+            card.style.display = show ? '' : 'none'
+            if (show) anyShown = true
           })
+          // Don't leave the "not matched" heading hanging over nothing.
+          if (unmatchedWrap) {
+            var anyUnmatchedShown = unmatchedCards.some(function (c) {
+              return c.style.display !== 'none'
+            })
+            unmatchedWrap.style.display = anyUnmatchedShown ? '' : 'none'
+          }
+          noSearchMatch.style.display = anyShown ? 'none' : ''
         }
         results.appendChild(search)
-        var infoText = document.createElement('div')
-        infoText.style.cssText = 'font-size:12px;color:#64748b;padding:4px 0 8px;'
-        infoText.textContent = "If your provider isn't listed, they may not treat this condition."
-        results.appendChild(infoText)
         var helpLink = document.createElement('div')
         helpLink.className = 'pm-help'
         helpLink.textContent = 'Help me choose instead'
@@ -1372,9 +1411,36 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           self.renderQuestion()
         }
         results.appendChild(helpLink)
+        results.appendChild(noSearchMatch)
         unique.forEach(function (item) {
           appendResultCard(item.provider, false)
         })
+        if (unmatched.length) {
+          unmatchedWrap = document.createElement('div')
+          unmatchedWrap.className = 'pm-outside-section'
+          var unmatchedTitle = document.createElement('div')
+          unmatchedTitle.className = 'pm-outside-title'
+          var unmatchedIcon = document.createElement('span')
+          unmatchedIcon.className = 'pm-outside-icon'
+          unmatchedIcon.setAttribute('aria-hidden', 'true')
+          unmatchedIcon.textContent = '⚠️'
+          unmatchedTitle.appendChild(unmatchedIcon)
+          unmatchedTitle.appendChild(document.createTextNode('Not matched to your answers'))
+          unmatchedWrap.appendChild(unmatchedTitle)
+          var unmatchedSub = document.createElement('div')
+          unmatchedSub.className = 'pm-outside-sub'
+          unmatchedSub.textContent =
+            "These providers don't match what you entered" +
+            (caseTypeName ? ' — they may not treat ' + caseTypeName.toLowerCase() + ' for you' : '') +
+            '. Call to confirm before booking.'
+          unmatchedWrap.appendChild(unmatchedSub)
+          results.appendChild(unmatchedWrap)
+          unmatched.forEach(function (provider) {
+            var card = self.buildCard(provider, false, true)
+            unmatchedCards.push(card)
+            results.appendChild(card)
+          })
+        }
       } else {
         var remaining = unique.slice()
         if (this.state.selectedLocationId) {
@@ -1519,7 +1585,11 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       })
     },
 
-    buildCard: function (provider, outsideArea) {
+    // `unmatched` is a provider shown to a patient who asked to browse everyone
+    // but whose answers don't match them. They are marked, and their contact
+    // details come from wherever they do practise rather than from the
+    // patient's case type, which they may not treat at all.
+    buildCard: function (provider, outsideArea, unmatched) {
       var self = this
       var config = this.data.config || {}
 
@@ -1538,7 +1608,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           this.data.providerLocations,
           this.data.offerings,
           provider.id,
-          this.state.selectedCaseTypeId
+          unmatched ? null : this.state.selectedCaseTypeId
         ),
         bookingMode,
         phoneMode,
@@ -1547,12 +1617,14 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
 
       // Build card
       var card = document.createElement('div')
-      card.className = outsideArea ? 'pm-card pm-card-outside' : 'pm-card'
+      card.className = outsideArea || unmatched ? 'pm-card pm-card-outside' : 'pm-card'
 
-      if (outsideArea) {
+      if (outsideArea || unmatched) {
         var outsideBadge = document.createElement('div')
         outsideBadge.className = 'pm-outside-badge'
-        outsideBadge.textContent = '📍 Not at your selected location'
+        outsideBadge.textContent = outsideArea
+          ? '📍 Not at your selected location'
+          : '⚠️ May not match your answers'
         card.appendChild(outsideBadge)
       }
 
@@ -1823,6 +1895,20 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       }
       callSlide.appendChild(callBack)
       actionsArea.appendChild(callSlide)
+
+      // A provider with no live offering has no contact details of their own;
+      // send the patient to the main office rather than leaving a dead end.
+      if (unmatched && !defaultPanel.children.length && !linkSlides.length && config.fallback_phone) {
+        var officeBtn = document.createElement('a')
+        officeBtn.className = 'pm-call'
+        officeBtn.href = 'tel:' + config.fallback_phone
+        officeBtn.textContent = '📞 Call Office'
+        officeBtn.onclick = function () {
+          self.trackClick(provider.id)
+          self.trackEvent('call_clicked')
+        }
+        defaultPanel.appendChild(officeBtn)
+      }
 
       if (defaultPanel.children.length > 0 || linkSlides.length > 0 || phoneLocsWithNumbers.length > 1) {
         card.appendChild(actionsArea)
