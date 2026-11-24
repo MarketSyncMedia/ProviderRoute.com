@@ -407,7 +407,14 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-recap-title{font-size:17px;font-weight:800;color:#0f172a;line-height:1.25;margin-top:4px;overflow-wrap:anywhere;}',
         '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:3px;}',
         '.pm-answers{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px 4px;margin-bottom:6px;}',
-        '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#64748b;margin-bottom:8px;}',
+        '.pm-answers-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}',
+        '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#0f172a;}',
+        '.pm-answers-edit,.pm-answer-return{background:#fff;border:1.5px solid ' + primaryColor + ';color:' + primaryColor + ';border-radius:999px;font-size:11px;font-weight:700;padding:3px 12px;cursor:pointer;font-family:inherit;line-height:1.3;}',
+        '.pm-answers-edit:hover,.pm-answer-return:hover{background:' + primaryColor + ';color:' + brandTextColor + ';}',
+        '.pm-answer-return{display:none;flex-shrink:0;margin-left:auto;align-self:center;}',
+        '.pm-answers-editing .pm-answer-return{display:inline-block;}',
+        '.pm-answers-note{display:none;font-size:12px;line-height:1.4;color:#475569;background:#f8fafc;border-radius:8px;padding:6px 10px;margin-bottom:10px;}',
+        '.pm-answers-editing .pm-answers-note{display:block;}',
         '.pm-answer-row{display:flex;align-items:flex-start;gap:10px;padding-bottom:10px;}',
         '.pm-answer-check{flex-shrink:0;width:18px;height:18px;margin-top:1px;border-radius:50%;background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;line-height:18px;text-align:center;}',
         '.pm-answer-text{min-width:0;}',
@@ -1073,7 +1080,29 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
 
     goBack: function () {
       if (!this.state.history.length) return
-      var last = this.state.history.pop()
+      this.restoreSnapshot(this.state.history.pop())
+    },
+
+    // Jump back to an earlier question to change its answer, keeping every
+    // answer before it. The answer being changed, and any given after it, are
+    // dropped: the later questions are asked again, since what they offer
+    // depends on the answers that came before.
+    goBackTo: function (questionIndex) {
+      var history = this.state.history
+      var found = -1
+      for (var i = history.length - 1; i >= 0; i--) {
+        if (history[i].questionIndex === questionIndex) {
+          found = i
+          break
+        }
+      }
+      if (found < 0) return
+      var snapshot = history[found]
+      history.length = found
+      this.restoreSnapshot(snapshot)
+    },
+
+    restoreSnapshot: function (last) {
       this.state.currentQuestionIndex = last.questionIndex
       this.state.activeOfferings = last.offerings
       this.state.answers = last.answers
@@ -1091,61 +1120,59 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var q = seq[i]
         if (!q) continue
         this.addBubble(q.question_text, false)
-        var ans = last.answers[q.id]
-        if (ans !== undefined && ans !== null) {
-          if (q.question_type === 'location') {
-            var loc = (this.data.locations || []).find(function(l) { return l.id === ans })
-            this.addBubble(loc ? loc.name : 'No preference', true)
-          } else {
-            this.addBubble(String(ans), true)
-          }
+        if (last.answers[q.id] !== undefined) {
+          this.addBubble(this.describeAnswer(q, last.answers[q.id]), true)
         }
       }
       this.renderQuestion()
     },
 
+    // An answer in the words the patient saw on the button they pressed.
+    describeAnswer: function (q, value) {
+      var self = this
+      if (q.question_type === 'location') {
+        if (value === null) return 'No preference'
+        var loc = (self.data.locations || []).find(function (l) {
+          return l.id === value
+        })
+        return loc ? loc.name : String(value)
+      }
+      // An optional question the patient skipped.
+      if (value === null || value === undefined) return 'Skipped'
+      if (q.question_type === 'entry') {
+        var ct = (self.data.caseTypes || []).find(function (c) {
+          return c.id === value
+        })
+        return ct ? ct.name : String(value)
+      }
+      if (q.question_type === 'clinical') {
+        var constraint = self.findConstraint(q.constraint_id)
+        if (constraint && constraint.type === 'binary') {
+          if (value === 'yes') return constraint.yes_label || 'Yes'
+          if (value === 'no') return constraint.no_label || 'No'
+        }
+        return String(value)
+      }
+      if (q.question_type === 'provider') {
+        return value === 'yes' ? 'Yes' : value === 'no' ? 'No' : String(value)
+      }
+      return String(value)
+    },
+
     // Every question the patient has answered so far, in the order asked, as
-    // { question, answer } with the answer in the words they saw on the button.
+    // { question, answer, index } with the answer in the words they saw on the
+    // button and the question's place in the sequence (to jump back to it).
     // Shared by the results recap card and the "no results" screen.
     getAnswerRows: function () {
       var self = this
       var rows = []
-      this.getQuestionSequence().forEach(function (q) {
+      this.getQuestionSequence().forEach(function (q, index) {
         if (!Object.prototype.hasOwnProperty.call(self.state.answers, q.id)) return
-        var value = self.state.answers[q.id]
-        var displayVal = ''
-        if (q.question_type === 'location') {
-          if (value === null) {
-            displayVal = 'No preference'
-          } else {
-            var loc = (self.data.locations || []).find(function (l) {
-              return l.id === value
-            })
-            displayVal = loc ? loc.name : String(value)
-          }
-        } else if (value === null || value === undefined) {
-          // An optional question the patient skipped.
-          displayVal = 'Skipped'
-        } else if (q.question_type === 'entry') {
-          var ct = (self.data.caseTypes || []).find(function (c) {
-            return c.id === value
-          })
-          displayVal = ct ? ct.name : String(value)
-        } else if (q.question_type === 'clinical') {
-          var constraint = self.findConstraint(q.constraint_id)
-          if (constraint && constraint.type === 'binary') {
-            if (value === 'yes') displayVal = constraint.yes_label || 'Yes'
-            else if (value === 'no') displayVal = constraint.no_label || 'No'
-            else displayVal = String(value)
-          } else {
-            displayVal = String(value)
-          }
-        } else if (q.question_type === 'provider') {
-          displayVal = value === 'yes' ? 'Yes' : value === 'no' ? 'No' : String(value)
-        } else {
-          displayVal = String(value)
-        }
-        rows.push({ question: q.question_text || '', answer: displayVal })
+        rows.push({
+          question: q.question_text || '',
+          answer: self.describeAnswer(q, self.state.answers[q.id]),
+          index: index,
+        })
       })
       return rows
     },
@@ -1165,22 +1192,29 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       var plural = count === 1 ? 'provider' : 'providers'
 
       if (caseTypeName) {
+        var browsing = this.state.bypassMode
         var sticky = el('div', 'pm-recap-sticky')
         var card = el('div', 'pm-recap')
         var top = el('div', 'pm-recap-top')
-        top.appendChild(el('span', 'pm-recap-eyebrow', 'Your matches'))
+        top.appendChild(el('span', 'pm-recap-eyebrow', browsing ? 'All providers' : 'Your matches'))
         top.appendChild(el('span', 'pm-recap-count', count + ' ' + plural))
         card.appendChild(top)
         card.appendChild(
-          el('div', 'pm-recap-title', caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : ''))
+          el(
+            'div',
+            'pm-recap-title',
+            browsing
+              ? 'Search for your provider'
+              : caseTypeName + ' specialists' + (locationName ? ' · ' + locationName : '')
+          )
         )
         card.appendChild(
           el(
             'div',
             'pm-recap-note',
-            this.state.bypassMode
-              ? 'Everyone who treats ' + caseTypeName.toLowerCase() + ' — not filtered by your answers.'
-              : 'Filtered by your answers — not everyone we have.'
+            browsing
+              ? 'Providers who treat ' + caseTypeName.toLowerCase() + ' for your case come first. The rest are marked.'
+              : 'Filtered by your answers.'
           )
         )
         sticky.appendChild(card)
@@ -1190,7 +1224,29 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       var rows = this.getAnswerRows()
       if (rows.length) {
         var panel = el('div', 'pm-answers')
-        panel.appendChild(el('div', 'pm-answers-title', 'What you told us'))
+        var head = el('div', 'pm-answers-head')
+        head.appendChild(el('div', 'pm-answers-title', 'What you told us'))
+        // Edit turns on a Return button beside each answer, so a patient can fix
+        // one answer without starting the whole thing over. It is worded as a
+        // return because that is what it does: it takes them back to that point
+        // in the questions, and they carry on from there.
+        var editBtn = el('button', 'pm-answers-edit', 'Edit')
+        editBtn.type = 'button'
+        editBtn.setAttribute('aria-expanded', 'false')
+        editBtn.onclick = function () {
+          var editing = panel.classList.toggle('pm-answers-editing')
+          editBtn.textContent = editing ? 'Done' : 'Edit'
+          editBtn.setAttribute('aria-expanded', String(editing))
+        }
+        head.appendChild(editBtn)
+        panel.appendChild(head)
+        panel.appendChild(
+          el(
+            'div',
+            'pm-answers-note',
+            'Tap Return to go back to that point in the questions. You’ll carry on from there.'
+          )
+        )
         rows.forEach(function (r) {
           var row = el('div', 'pm-answer-row')
           row.appendChild(el('span', 'pm-answer-check', '✓'))
@@ -1198,6 +1254,13 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           text.appendChild(el('div', 'pm-answer-q', r.question))
           text.appendChild(el('div', 'pm-answer-a', r.answer))
           row.appendChild(text)
+          var back = el('button', 'pm-answer-return', '↩ Return')
+          back.type = 'button'
+          back.setAttribute('aria-label', 'Return to this point in the questions: ' + r.question)
+          back.onclick = function () {
+            self.goBackTo(r.index)
+          }
+          row.appendChild(back)
           panel.appendChild(row)
         })
         frag.appendChild(panel)
@@ -1334,25 +1397,57 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var selectedLocForHeader = (self.data.locations || []).find(function (l) { return l.id === self.state.selectedLocationId })
         if (selectedLocForHeader) selectedLocName = selectedLocForHeader.name
       }
-      results.appendChild(this.buildRecap(caseTypeName, selectedLocName, unique.length))
+      // A patient who already knows who they want to see gets the whole
+      // directory to search, not just the providers their answers matched. The
+      // ones who don't match come after, marked, so it is clear why they are
+      // there. Analytics still count only the matched providers as shown.
+      var unmatched = []
+      if (this.state.bypassMode) {
+        var matchedIds = {}
+        unique.forEach(function (item) {
+          matchedIds[item.provider.id] = true
+        })
+        unmatched = (self.data.providers || [])
+          .filter(function (p) {
+            return !matchedIds[p.id]
+          })
+          .sort(function (a, b) {
+            return String(a.name).localeCompare(String(b.name))
+          })
+      }
+      results.appendChild(
+        this.buildRecap(caseTypeName, selectedLocName, unique.length + unmatched.length)
+      )
       if (this.state.bypassMode) {
         var search = document.createElement('input')
         search.className = 'pm-search'
         search.placeholder = 'Search by provider name...'
         search.setAttribute('aria-label', 'Search by provider name')
+        var unmatchedWrap = null
+        var unmatchedCards = []
+        var noSearchMatch = document.createElement('div')
+        noSearchMatch.style.cssText = 'font-size:13px;color:#64748b;padding:8px 0;display:none;'
+        noSearchMatch.textContent = 'No provider by that name. Try a different spelling.'
         search.oninput = function () {
           var q = search.value.toLowerCase()
+          var anyShown = false
           results.querySelectorAll('.pm-card').forEach(function (card) {
             var name = card.querySelector('.pm-name')
-            if (name)
-              card.style.display = name.textContent.toLowerCase().indexOf(q) > -1 ? '' : 'none'
+            if (!name) return
+            var show = name.textContent.toLowerCase().indexOf(q) > -1
+            card.style.display = show ? '' : 'none'
+            if (show) anyShown = true
           })
+          // Don't leave the "not matched" heading hanging over nothing.
+          if (unmatchedWrap) {
+            var anyUnmatchedShown = unmatchedCards.some(function (c) {
+              return c.style.display !== 'none'
+            })
+            unmatchedWrap.style.display = anyUnmatchedShown ? '' : 'none'
+          }
+          noSearchMatch.style.display = anyShown ? 'none' : ''
         }
         results.appendChild(search)
-        var infoText = document.createElement('div')
-        infoText.style.cssText = 'font-size:12px;color:#64748b;padding:4px 0 8px;'
-        infoText.textContent = "If your provider isn't listed, they may not treat this condition."
-        results.appendChild(infoText)
         var helpLink = document.createElement('div')
         helpLink.className = 'pm-help'
         helpLink.textContent = 'Help me choose instead'
@@ -1372,9 +1467,45 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           self.renderQuestion()
         }
         results.appendChild(helpLink)
+        results.appendChild(noSearchMatch)
         unique.forEach(function (item) {
           appendResultCard(item.provider, false)
         })
+        if (unmatched.length) {
+          unmatchedWrap = document.createElement('div')
+          unmatchedWrap.className = 'pm-outside-section'
+          var unmatchedTitle = document.createElement('div')
+          unmatchedTitle.className = 'pm-outside-title'
+          var unmatchedIcon = document.createElement('span')
+          unmatchedIcon.className = 'pm-outside-icon'
+          unmatchedIcon.setAttribute('aria-hidden', 'true')
+          unmatchedIcon.textContent = '⚠️'
+          unmatchedTitle.appendChild(unmatchedIcon)
+          unmatchedTitle.appendChild(document.createTextNode('Other providers'))
+          unmatchedWrap.appendChild(unmatchedTitle)
+          var unmatchedSub = document.createElement('div')
+          unmatchedSub.className = 'pm-outside-sub'
+          unmatchedSub.textContent =
+            (caseTypeName
+              ? "These providers don't treat " + caseTypeName.toLowerCase() + ' for your case. '
+              : "These providers aren't a match for your case. ") +
+            'Call the office to confirm before booking.'
+          unmatchedWrap.appendChild(unmatchedSub)
+          results.appendChild(unmatchedWrap)
+          unmatched.forEach(function (provider) {
+            // Say what is actually true: they don't treat the condition, or they
+            // do but not for this patient (their age or another answer ruled
+            // them out).
+            var treatsIt = (self.data.offerings || []).some(function (o) {
+              return o.provider_id === provider.id && o.case_type_id === self.state.selectedCaseTypeId
+            })
+            var what = caseTypeName || 'this'
+            var reason = treatsIt ? "Doesn't treat " + what + ' for your case' : "Doesn't treat " + what
+            var card = self.buildCard(provider, false, reason)
+            unmatchedCards.push(card)
+            results.appendChild(card)
+          })
+        }
       } else {
         var remaining = unique.slice()
         if (this.state.selectedLocationId) {
@@ -1519,7 +1650,11 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       })
     },
 
-    buildCard: function (provider, outsideArea) {
+    // `unmatched` is the badge text for a provider shown to a patient who asked
+    // to browse everyone but who isn't one the answers matched. They are marked
+    // with it, and their contact details come from wherever they do practise
+    // rather than from the patient's case type, which they may not treat at all.
+    buildCard: function (provider, outsideArea, unmatched) {
       var self = this
       var config = this.data.config || {}
 
@@ -1538,7 +1673,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           this.data.providerLocations,
           this.data.offerings,
           provider.id,
-          this.state.selectedCaseTypeId
+          unmatched ? null : this.state.selectedCaseTypeId
         ),
         bookingMode,
         phoneMode,
@@ -1547,12 +1682,14 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
 
       // Build card
       var card = document.createElement('div')
-      card.className = outsideArea ? 'pm-card pm-card-outside' : 'pm-card'
+      card.className = outsideArea || unmatched ? 'pm-card pm-card-outside' : 'pm-card'
 
-      if (outsideArea) {
+      if (outsideArea || unmatched) {
         var outsideBadge = document.createElement('div')
         outsideBadge.className = 'pm-outside-badge'
-        outsideBadge.textContent = '📍 Not at your selected location'
+        outsideBadge.textContent = outsideArea
+          ? '📍 Not at your selected location'
+          : '⚠️ ' + unmatched
         card.appendChild(outsideBadge)
       }
 
@@ -1824,6 +1961,20 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       callSlide.appendChild(callBack)
       actionsArea.appendChild(callSlide)
 
+      // A provider with no live offering has no contact details of their own;
+      // send the patient to the main office rather than leaving a dead end.
+      if (unmatched && !defaultPanel.children.length && !linkSlides.length && config.fallback_phone) {
+        var officeBtn = document.createElement('a')
+        officeBtn.className = 'pm-call'
+        officeBtn.href = 'tel:' + config.fallback_phone
+        officeBtn.textContent = '📞 Call Office'
+        officeBtn.onclick = function () {
+          self.trackClick(provider.id)
+          self.trackEvent('call_clicked')
+        }
+        defaultPanel.appendChild(officeBtn)
+      }
+
       if (defaultPanel.children.length > 0 || linkSlides.length > 0 || phoneLocsWithNumbers.length > 1) {
         card.appendChild(actionsArea)
       }
@@ -2017,7 +2168,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     'getQuestionSequence', 'findConstraint', 'renderQuestion', 'renderCaseTypes',
     'renderLocationSelect', 'renderProviderChoice', 'renderBinary', 'renderRange',
     'renderExact', 'handleAnswer', 'goBack', 'showZeroResults', 'showResults',
-    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap',
+    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer',
   ].forEach(function (name) {
     var original = widget[name]
     if (typeof original !== 'function') return
