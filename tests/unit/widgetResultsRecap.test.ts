@@ -103,9 +103,13 @@ describe('the results recap card', () => {
 
     const card = body.querySelector('.pm-recap')!
     expect(card).not.toBeNull()
-    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
+    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow Specialists')
     expect(card.querySelector('.pm-recap-count')!.textContent).toBe('2 matches')
-    expect(card.querySelector('.pm-recap-note')!.textContent).toBe('These match your answers.')
+    // Two lines of one header, in the same style.
+    expect(Array.from(card.querySelectorAll('.pm-recap-title')).map((t) => t.textContent)).toEqual(['Elbow Specialists', 'Towson'])
+    expect(card.querySelector('.pm-recap-note')!.textContent).toBe(
+      'Based on your answers, these providers treat your condition.'
+    )
 
     const rows = Array.from(body.querySelectorAll('.pm-answer-row')).map((r) => [
       r.querySelector('.pm-answer-q')!.textContent,
@@ -125,14 +129,16 @@ describe('the results recap card', () => {
 
     const card = body.querySelector('.pm-recap')!
     // The same card Help me choose shows, plus where to look for someone else.
-    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists')
+    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow Specialists')
     expect(pills(body)).toEqual(['3 matches'])
+    // No location picked, so no second line.
+    expect(card.querySelector('.pm-recap-place')).toBeNull()
     expect(card.querySelector('.pm-recap-note')!.textContent).toBe(
-      'These match your answers. Don’t see your usual provider? Search above or scroll down.'
+      'These providers treat your condition. Don’t see yours? Search above or scroll down.'
     )
     const find = body.querySelector('.pm-find')!
     expect(find.querySelector('.pm-find-title')!.textContent).toBe(
-      'Search our list of physicians to see if yours treats this condition'
+      'Search our list of providers to see if yours treats this condition'
     )
     // Search first, then the way out of it, as a real button.
     const search = find.querySelector('input.pm-search')!
@@ -166,7 +172,9 @@ describe('the results recap card', () => {
       const { body } = await boot()
       await startAs(body, 'Yes')
       expect(pills(body)).toEqual(['1 match'])
-      expect(body.querySelector('.pm-recap-note')!.textContent).toMatch(/^This provider matches your answers\./)
+      expect(body.querySelector('.pm-recap-note')!.textContent).toBe(
+        'This provider treats your condition. Don’t see yours? Search above or scroll down.'
+      )
     } finally {
       payload.offerings.push(...offerings)
       payload.providers.push(...providers)
@@ -188,9 +196,9 @@ describe('"I already know who I want to see"', () => {
     // Alphabetical, after the matched ones.
     expect(names(body, '.pm-card-outside')).toEqual(['Dr. 4', 'Dr. 5'])
     const heading = results.querySelector('.pm-recap-outside')!
-    expect(heading.textContent).toContain('Other providers')
+    expect(heading.textContent).toContain('Other Providers')
     expect(heading.textContent).toContain(
-      'If your provider is below, they aren’t a match based on your answers. Choose a recommended physician above, or call the office to learn more.'
+      'Based on your answers, these aren’t a match. See why on each card, or call the office.'
     )
     // No blanket claim about why they're listed, and no guessing.
     expect(heading.textContent).not.toMatch(/may not|might|usually/i)
@@ -308,7 +316,7 @@ describe('"I already know who I want to see"', () => {
 
     const results = body.querySelector('.pm-results')!
     expect(pm.state.bypassMode).toBe(false)
-    expect(results.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
+    expect(results.querySelector('.pm-recap-title')!.textContent).toBe('Elbow Specialists')
     // The knee-only and no-offering providers are gone, and so is the search.
     expect(results.textContent).not.toContain('Not a match for this visit')
     expect(Array.from(results.querySelectorAll('.pm-name')).map((n) => n.textContent).sort()).toEqual(['Dr. 1', 'Dr. 2', 'Dr. 3'])
@@ -320,7 +328,7 @@ describe('section headers that take over as the list scrolls', () => {
   /** Each group's sticky header, and the names of the providers inside that group. */
   const groups = (body: HTMLElement) =>
     Array.from(body.querySelectorAll('.pm-results > .pm-group')).map((g) => [
-      g.querySelector('.pm-recap-title, .pm-answers-title, .pm-find-title')!.textContent,
+      Array.from(g.querySelectorAll('.pm-recap-title, .pm-answers-title, .pm-find-title')).map((t) => t.textContent).join(' / '),
       Array.from(g.querySelectorAll('.pm-name')).map((n) => n.textContent).sort(),
     ])
   async function answerTowsonAge45(body: HTMLElement) {
@@ -337,11 +345,11 @@ describe('section headers that take over as the list scrolls', () => {
     await startAs(body, 'Yes')
     expect(groups(body)).toEqual([
       ['What you told us', []],
-      ['Search our list of physicians to see if yours treats this condition', []],
-      ['Elbow specialists', ['Dr. 1', 'Dr. 2', 'Dr. 3']],
-      ['Other providers', ['Dr. 4', 'Dr. 5']],
+      ['Search our list of providers to see if yours treats this condition', []],
+      ['Elbow Specialists', ['Dr. 1', 'Dr. 2', 'Dr. 3']],
+      ['Other Providers', ['Dr. 4', 'Dr. 5']],
     ])
-    expect(body.querySelector('.pm-recap-outside .pm-recap-count')!.textContent).toBe('2 providers')
+    expect(body.querySelector('.pm-recap-outside .pm-recap-count')!.textContent).toBe('2 non-matches')
   })
 
   it('gives Help me choose the same: answers, the matches card, then not at the location', async () => {
@@ -350,18 +358,59 @@ describe('section headers that take over as the list scrolls', () => {
     await answerTowsonAge45(body)
     expect(groups(body)).toEqual([
       ['What you told us', []],
-      ['Elbow specialists · Towson', ['Dr. 1', 'Dr. 3']],
-      ['Not at Towson', ['Dr. 2']],
+      ['Elbow Specialists / Towson', ['Dr. 1', 'Dr. 3']],
+      ['Elbow Specialists / Not at Towson', ['Dr. 2']],
     ])
     expect(body.querySelector('.pm-recap-outside .pm-recap-count')!.textContent).toBe('1 provider')
+    expect(body.querySelector('.pm-recap-outside .pm-recap-note')!.textContent).toBe(
+      'This provider treats your condition at another office.'
+    )
     // Its own cards keep the location label; the flag and tags are the search's.
     expect(body.querySelector('.pm-card-outside .pm-outside-badge')!.textContent).toBe('📍 Not at your selected location')
     expect(body.querySelector('.pm-reason')).toBeNull()
   })
 })
 
+describe('Back to my matches', () => {
+  const back = (body: HTMLElement) => body.querySelector('button.pm-recap-back') as HTMLButtonElement
+  const matchesGroup = (body: HTMLElement) => body.querySelector('.pm-recap:not(.pm-recap-outside)')!.closest('.pm-group') as HTMLElement
+
+  it('is on the section below the matches, and only there, in both flows', async () => {
+    const search = await boot()
+    await startAs(search.body, 'Yes')
+    expect(search.body.querySelectorAll('button.pm-recap-back')).toHaveLength(1)
+    expect(back(search.body).closest('.pm-recap-outside')).not.toBeNull()
+    expect(back(search.body).textContent).toBe('Back to my matches')
+
+    const guided = await boot()
+    await startAs(guided.body, 'No')
+    ;(guided.body.querySelector('select.pm-select') as HTMLSelectElement).value = 'towson'
+    click(guided.body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    ;(guided.body.querySelector('input.pm-number-input') as HTMLInputElement).value = '45'
+    click(guided.body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    expect(guided.body.querySelectorAll('button.pm-recap-back')).toHaveLength(1)
+    expect(back(guided.body).closest('.pm-recap-outside')).not.toBeNull()
+  })
+
+  it('goes to the matches, clearing a search that had hidden them', async () => {
+    const { pm, body } = await boot()
+    await startAs(body, 'Yes')
+    const search = body.querySelector('input.pm-search') as HTMLInputElement
+    search.value = 'dr. 5'
+    search.dispatchEvent(new Event('input'))
+    expect(matchesGroup(body).style.display).toBe('none')
+
+    click(back(body))
+    expect(search.value).toBe('')
+    expect(matchesGroup(body).style.display).toBe('')
+    expect(pm.shadow!.activeElement).toBe(matchesGroup(body))
+  })
+})
+
 describe('a search with no matches', () => {
-  it('says so, and points to the office rather than to matches that are not there', async () => {
+  it('says so, with no button back to matches that are not there', async () => {
     // Only Rosedale treats it, and the patient picks Towson before searching.
     const providerQuestion = payload.questions.find((q) => q.id === 'q-provider')!
     providerQuestion.order_rank = 9
@@ -379,9 +428,11 @@ describe('a search with no matches', () => {
       await vi.advanceTimersByTimeAsync(400)
       click(option(body, 'Yes'))
       await vi.advanceTimersByTimeAsync(400)
+      // Nothing to go back to.
+      expect(body.querySelector('button.pm-recap-back')).toBeNull()
       expect(Array.from(body.querySelectorAll('.pm-recap-note')).map((n) => n.textContent)).toEqual([
-        'None match your answers. Don’t see your usual provider? Search above or scroll down.',
-        'If your provider is below, they aren’t a match based on your answers. Call the office to learn more.',
+        'Based on your answers, no providers match. Search above or scroll down to find yours.',
+        'Based on your answers, these aren’t a match. See why on each card, or call the office.',
       ])
     } finally {
       providerQuestion.order_rank = 1

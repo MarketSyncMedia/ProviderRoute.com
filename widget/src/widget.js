@@ -407,12 +407,18 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-reason{position:relative;padding-left:16px;color:#78350f;font-size:12px;font-weight:600;line-height:1.35;}',
         '.pm-reason::before{content:"\\2715";position:absolute;left:1px;top:0;font-size:10px;line-height:16px;color:#b45309;}',
         '.pm-recap{background:#f8fafc;background:color-mix(in srgb,' + primaryColor + ' 7%,#fff);border:1px solid #e2e8f0;border-color:color-mix(in srgb,' + primaryColor + ' 28%,#fff);border-left:5px solid ' + primaryColor + ';border-radius:12px;padding:10px 14px 11px;box-shadow:0 4px 14px rgba(15,23,42,0.12);}',
-        '.pm-recap-top{display:flex;align-items:center;justify-content:space-between;gap:10px;}',
+        '.pm-recap-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}',
         '.pm-recap-count{flex-shrink:0;background:' + primaryColor + ';color:' + brandTextColor + ';font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;}',
-        '.pm-recap-title{min-width:0;font-size:16px;font-weight:800;color:#0f172a;line-height:1.25;overflow-wrap:anywhere;}',
+        '.pm-recap-heading{min-width:0;}',
+        // The location is as much the header as the specialty: same style, its own line.
+        '.pm-recap-title{font-size:16px;font-weight:800;color:#0f172a;line-height:1.25;overflow-wrap:anywhere;}',
+        '.pm-group:focus{outline:none;}',
+        '.pm-recap-back{margin-top:8px;background:#fff;border:1.5px solid #92400e;color:#92400e;border-radius:999px;font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer;font-family:inherit;line-height:1.3;}',
+        '.pm-recap-back::before{content:"\\2191";margin-right:5px;}',
+        '.pm-recap-back:hover{background:#92400e;color:#fff;}',
         '.pm-recap-outside{background:#fffbeb;border-color:#fde68a;border-left-color:#d97706;}',
         '.pm-recap-outside .pm-recap-count{background:#92400e;color:#fff;}',
-        '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:3px;}',
+        '.pm-recap-note{font-size:12px;color:#475569;line-height:1.4;margin-top:4px;text-wrap:pretty;}',
         '.pm-answers{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px 4px;margin-bottom:6px;}',
         '.pm-answers-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}',
         '.pm-answers-title{font-size:11px;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:#0f172a;}',
@@ -1199,25 +1205,43 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       }
       var card = el(opts.outside ? 'pm-recap pm-recap-outside' : 'pm-recap')
       var top = el('pm-recap-top')
-      top.appendChild(el('pm-recap-title', opts.title))
+      var heading = el('pm-recap-heading')
+      heading.appendChild(el('pm-recap-title', opts.title))
+      if (opts.place) heading.appendChild(el('pm-recap-title pm-recap-place', opts.place))
+      top.appendChild(heading)
       top.appendChild(el('pm-recap-count', opts.count))
       card.appendChild(top)
       if (opts.note) card.appendChild(el('pm-recap-note', opts.note))
+      if (opts.onBack) {
+        var back = document.createElement('button')
+        back.type = 'button'
+        back.className = 'pm-recap-back'
+        back.textContent = 'Back to my matches'
+        back.onclick = opts.onBack
+        card.appendChild(back)
+      }
       return card
     },
 
-    // Heads the matches, the same card in both flows. The count is in the pill, so
-    // the line doesn't repeat it.
+    specialistsTitle: function (caseTypeName) {
+      return caseTypeName ? caseTypeName + ' Specialists' : 'Specialists'
+    },
+
+    // Heads the matches, the same card in both flows.
     buildRecap: function (caseTypeName, locationName, matchCount) {
-      var note =
-        matchCount === 0
-          ? 'None match your answers.'
-          : matchCount === 1
-            ? 'This provider matches your answers.'
-            : 'These match your answers.'
-      if (this.state.bypassMode) note += ' Don\u2019t see your usual provider? Search above or scroll down.'
+      var searching = this.state.bypassMode
+      var treats = matchCount === 1 ? 'this provider treats your condition.' : 'these providers treat your condition.'
+      var note
+      if (!matchCount) {
+        note = 'Based on your answers, no providers match.' + (searching ? ' Search above or scroll down to find yours.' : '')
+      } else if (searching) {
+        note = treats.charAt(0).toUpperCase() + treats.slice(1) + ' Don\u2019t see yours? Search above or scroll down.'
+      } else {
+        note = 'Based on your answers, ' + treats
+      }
       return this.sectionCard({
-        title: (caseTypeName ? caseTypeName + ' specialists' : 'Specialists') + (locationName ? ' · ' + locationName : ''),
+        title: this.specialistsTitle(caseTypeName),
+        place: locationName,
         count: matchCount + (matchCount === 1 ? ' match' : ' matches'),
         note: note,
       })
@@ -1461,17 +1485,32 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       var matches = appendGroup(
         this.buildRecap(caseTypeName, selectedLocName, matched.length)
       )
-      function providerCount(n) {
-        return n + (n === 1 ? ' provider' : ' providers')
-      }
+      // From the sections below the matches, back up to them. A search that has
+      // hidden the matches is cleared first. Nothing to go back to without any.
+      var search = null
+      var backToMatches = matched.length
+        ? function () {
+            if (search && search.value) {
+              search.value = ''
+              search.oninput()
+            }
+            var top = body.scrollTop + matches.getBoundingClientRect().top - body.getBoundingClientRect().top
+            var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            if (body.scrollTo) body.scrollTo({ top: top, behavior: calm ? 'auto' : 'smooth' })
+            else body.scrollTop = top
+            // Keyboard and screen reader users land there too.
+            matches.setAttribute('tabindex', '-1')
+            matches.focus({ preventScroll: true })
+          }
+        : null
       if (this.state.bypassMode) {
         var panel = document.createElement('div')
         panel.className = 'pm-find'
         var findTitle = document.createElement('div')
         findTitle.className = 'pm-find-title'
-        findTitle.textContent = 'Search our list of physicians to see if yours treats this condition'
+        findTitle.textContent = 'Search our list of providers to see if yours treats this condition'
         panel.appendChild(findTitle)
-        var search = document.createElement('input')
+        search = document.createElement('input')
         search.className = 'pm-search'
         search.placeholder = 'Search by provider name...'
         search.setAttribute('aria-label', 'Search by provider name')
@@ -1534,13 +1573,13 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           others = appendGroup(
             this.sectionCard({
               outside: true,
-              title: 'Other providers',
-              count: providerCount(unmatched.length + offLocation.length),
-              note:
-                'If your provider is below, they aren\u2019t a match based on your answers. ' +
-                (matched.length
-                  ? 'Choose a recommended physician above, or call the office to learn more.'
-                  : 'Call the office to learn more.'),
+              title: 'Other Providers',
+              onBack: backToMatches,
+              count:
+                unmatched.length + offLocation.length === 1
+                  ? '1 non-match'
+                  : unmatched.length + offLocation.length + ' non-matches',
+              note: 'Based on your answers, these aren\u2019t a match. See why on each card, or call the office.',
             })
           )
           offLocation.forEach(function (item) {
@@ -1566,9 +1605,14 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           var elsewhere = appendGroup(
             this.sectionCard({
               outside: true,
-              title: 'Not at ' + selectedLocName,
-              count: providerCount(offLocation.length),
-              note: 'Same care, different office.',
+              title: this.specialistsTitle(caseTypeName),
+              place: 'Not at ' + selectedLocName,
+              onBack: backToMatches,
+              count: offLocation.length + (offLocation.length === 1 ? ' provider' : ' providers'),
+              note:
+                offLocation.length === 1
+                  ? 'This provider treats your condition at another office.'
+                  : 'These providers treat your condition at another office.',
             })
           )
           offLocation.forEach(function (item) {
@@ -2250,7 +2294,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     'getQuestionSequence', 'findConstraint', 'renderQuestion', 'renderCaseTypes',
     'renderLocationSelect', 'renderProviderChoice', 'renderBinary', 'renderRange',
     'renderExact', 'handleAnswer', 'goBack', 'showZeroResults', 'showResults',
-    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer', 'mismatchReasons', 'buildAnswers', 'sectionCard',
+    'renderGrouped', 'setupScrollDepthTracking', 'buildCard', 'getAnswerRows', 'buildRecap', 'goBackTo', 'restoreSnapshot', 'describeAnswer', 'mismatchReasons', 'buildAnswers', 'sectionCard', 'specialistsTitle',
   ].forEach(function (name) {
     var original = widget[name]
     if (typeof original !== 'function') return
