@@ -41,7 +41,7 @@ const payload = {
   ],
   // p1-p3 treat elbow. p4 treats only knee, p5 has no live offering at all.
   providers: [1, 2, 3, 4, 5].map((n) => ({ id: `p${n}`, name: `Dr. ${n}`, category_ids: [], booking_mode: 'default', phone_mode: 'default' })),
-  providerLocations: [{ provider_id: 'p4', location_id: 'rosedale', booking_link: null, self_schedule_link: null, phone: '4105550144' }],
+  providerLocations: [{ provider_id: 'p4', location_id: 'rosedale', booking_link: 'https://book.example/4', self_schedule_link: null, phone: '4105550144' }],
   categories: [],
 }
 
@@ -104,8 +104,8 @@ describe('the results recap card', () => {
     const card = body.querySelector('.pm-recap')!
     expect(card).not.toBeNull()
     expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
-    expect(card.querySelector('.pm-recap-count')!.textContent).toBe('2 providers')
-    expect(card.querySelector('.pm-recap-note')!.textContent).toBe('Filtered by your answers.')
+    expect(card.querySelector('.pm-recap-count')!.textContent).toBe('2 matches')
+    expect(card.querySelector('.pm-recap-note')!.textContent).toBe('These match your answers.')
 
     const rows = Array.from(body.querySelectorAll('.pm-answer-row')).map((r) => [
       r.querySelector('.pm-answer-q')!.textContent,
@@ -124,12 +124,21 @@ describe('the results recap card', () => {
     await startAs(body, 'Yes')
 
     const card = body.querySelector('.pm-recap')!
-    expect(card.querySelector('.pm-recap-eyebrow')).toBeNull()
-    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Find your provider')
-    expect(pills(body)).toEqual(['3 matches', '5 providers'])
+    // The same card Help me choose shows, plus where to look for someone else.
+    expect(card.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists')
+    expect(pills(body)).toEqual(['3 matches'])
     expect(card.querySelector('.pm-recap-note')!.textContent).toBe(
-      '3 providers match your answers and appear first. Search to see if yours is one of them.'
+      'These match your answers. Don’t see your usual provider? Search above or scroll down.'
     )
+    const find = body.querySelector('.pm-find')!
+    expect(find.querySelector('.pm-find-title')!.textContent).toBe(
+      'Search our list of physicians to see if yours treats this condition'
+    )
+    // Search first, then the way out of it, as a real button.
+    const search = find.querySelector('input.pm-search')!
+    const help = find.querySelector('button.pm-help')!
+    expect(help.textContent).toBe('Help me choose instead')
+    expect(search.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(Array.from(body.querySelectorAll('.pm-answer-a')).map((a) => a.textContent)).toEqual(['Elbow', 'Yes'])
   })
 
@@ -142,7 +151,8 @@ describe('the results recap card', () => {
     // The patient's answers come first and scroll away; the card then heads the matches.
     expect(results.firstElementChild!.querySelector('.pm-answers')).not.toBeNull()
     expect(results.firstElementChild!.querySelector('.pm-group-head')).toBeNull()
-    expect(results.children[1].firstElementChild).toBe(sticky)
+    expect(results.children[1].querySelector('.pm-find')).not.toBeNull()
+    expect(results.children[2].firstElementChild).toBe(sticky)
     expect(sticky.querySelector('.pm-recap')).not.toBeNull()
     // The sticky strip comes before the first provider card.
     const firstCard = results.querySelector('.pm-card')!
@@ -155,10 +165,8 @@ describe('the results recap card', () => {
     try {
       const { body } = await boot()
       await startAs(body, 'Yes')
-      expect(pills(body)).toEqual(['1 match', '1 provider'])
-      expect(body.querySelector('.pm-recap-note')!.textContent).toBe(
-        '1 provider matches your answers and appears first. Search to see if it’s yours.'
-      )
+      expect(pills(body)).toEqual(['1 match'])
+      expect(body.querySelector('.pm-recap-note')!.textContent).toMatch(/^This provider matches your answers\./)
     } finally {
       payload.offerings.push(...offerings)
       payload.providers.push(...providers)
@@ -180,14 +188,14 @@ describe('"I already know who I want to see"', () => {
     // Alphabetical, after the matched ones.
     expect(names(body, '.pm-card-outside')).toEqual(['Dr. 4', 'Dr. 5'])
     const heading = results.querySelector('.pm-recap-outside')!
-    expect(heading.textContent).toContain('Providers outside your requirements')
+    expect(heading.textContent).toContain('Other providers')
     expect(heading.textContent).toContain(
-      "The providers below don't match your requirements based on your answers above."
+      'If your provider is below, they aren’t a match based on your answers. Choose a recommended physician above, or call the office to learn more.'
     )
     // No blanket claim about why they're listed, and no guessing.
     expect(heading.textContent).not.toMatch(/may not|might|usually/i)
     const badges = Array.from(body.querySelectorAll('.pm-card-outside .pm-outside-badge')).map((b) => b.textContent)
-    expect(badges).toEqual(["⚠️ Doesn't match your requirements", "⚠️ Doesn't match your requirements"])
+    expect(badges).toEqual(['⚠️ Not a match for this visit', '⚠️ Not a match for this visit'])
 
     const lastMatched = Array.from(results.querySelectorAll('.pm-card:not(.pm-card-outside)')).pop()!
     expect(lastMatched.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -216,9 +224,9 @@ describe('"I already know who I want to see"', () => {
       const cards = Array.from(body.querySelectorAll('.pm-card-outside'))
       // Dr. 2 fits everything but Towson, so they say so and aren't counted as a match.
       expect(cards.map((c) => c.querySelector('.pm-name')!.textContent)).toEqual(['Dr. 2', 'Dr. 4', 'Dr. 5', 'Dr. 6'])
-      expect(pills(body)).toEqual(['2 matches', '6 providers'])
+      expect(pills(body)).toEqual(['2 matches'])
       cards.forEach((c) => {
-        expect(c.querySelector('.pm-outside-badge')!.textContent).toBe("⚠️ Doesn't match your requirements")
+        expect(c.querySelector('.pm-outside-badge')!.textContent).toBe('⚠️ Not a match for this visit')
       })
       // Under the flag, the reasons: general, never the rule's own numbers.
       expect(cards.map(tags)).toEqual([
@@ -242,6 +250,8 @@ describe('"I already know who I want to see"', () => {
     const [knee, none] = Array.from(body.querySelectorAll('.pm-card-outside'))
     // p4 treats knee, not elbow: still reachable at the number saved for where they practise.
     expect(knee.querySelector('a.pm-call')!.getAttribute('href')).toBe('tel:4105550144')
+    // Not a match is information, never a lock: they can still book as well as call.
+    expect(knee.querySelector('a.pm-book')!.getAttribute('href')).toBe('https://book.example/4')
     // p5 has nothing of their own, so the office number stands in.
     expect(none.querySelector('a.pm-call')!.getAttribute('href')).toBe('tel:4105550100')
   })
@@ -251,7 +261,8 @@ describe('"I already know who I want to see"', () => {
     await startAs(body, 'Yes')
     const search = body.querySelector('input.pm-search') as HTMLInputElement
     const heading = body.querySelector('.pm-recap-outside')!.closest('.pm-group') as HTMLElement
-    const matches = search.closest('.pm-group') as HTMLElement
+    const matches = body.querySelector('.pm-recap:not(.pm-recap-outside)')!.closest('.pm-group') as HTMLElement
+    const find = search.closest('.pm-group') as HTMLElement
     const visible = () =>
       Array.from(body.querySelectorAll<HTMLElement>('.pm-card'))
         .filter((c) => c.style.display !== 'none')
@@ -264,9 +275,9 @@ describe('"I already know who I want to see"', () => {
     type('dr. 5')
     expect(visible()).toEqual(['Dr. 5'])
     expect(heading.style.display).toBe('')
-    // The search box lives with the matches, so that group never disappears from under it.
-    expect(matches.style.display).toBe('')
-    expect(matches).not.toBe(heading)
+    expect(matches.style.display).toBe('none')
+    // The search box has its own section, so it never disappears.
+    expect(find.style.display).toBe('')
 
     type('dr. 1')
     expect(visible()).toEqual(['Dr. 1'])
@@ -299,7 +310,7 @@ describe('"I already know who I want to see"', () => {
     expect(pm.state.bypassMode).toBe(false)
     expect(results.querySelector('.pm-recap-title')!.textContent).toBe('Elbow specialists · Towson')
     // The knee-only and no-offering providers are gone, and so is the search.
-    expect(results.textContent).not.toContain("Doesn't match your requirements")
+    expect(results.textContent).not.toContain('Not a match for this visit')
     expect(Array.from(results.querySelectorAll('.pm-name')).map((n) => n.textContent).sort()).toEqual(['Dr. 1', 'Dr. 2', 'Dr. 3'])
     expect(results.querySelector('input.pm-search')).toBeNull()
   })
@@ -309,7 +320,7 @@ describe('section headers that take over as the list scrolls', () => {
   /** Each group's sticky header, and the names of the providers inside that group. */
   const groups = (body: HTMLElement) =>
     Array.from(body.querySelectorAll('.pm-results > .pm-group')).map((g) => [
-      g.querySelector('.pm-recap-title, .pm-answers-title')!.textContent,
+      g.querySelector('.pm-recap-title, .pm-answers-title, .pm-find-title')!.textContent,
       Array.from(g.querySelectorAll('.pm-name')).map((n) => n.textContent).sort(),
     ])
   async function answerTowsonAge45(body: HTMLElement) {
@@ -321,13 +332,14 @@ describe('section headers that take over as the list scrolls', () => {
     await vi.advanceTimersByTimeAsync(400)
   }
 
-  it('gives the search its answers, then the matches card, then the outside card', async () => {
+  it('gives the search its answers, the search, the matches, then the outside card', async () => {
     const { body } = await boot()
     await startAs(body, 'Yes')
     expect(groups(body)).toEqual([
       ['What you told us', []],
-      ['Find your provider', ['Dr. 1', 'Dr. 2', 'Dr. 3']],
-      ['Providers outside your requirements', ['Dr. 4', 'Dr. 5']],
+      ['Search our list of physicians to see if yours treats this condition', []],
+      ['Elbow specialists', ['Dr. 1', 'Dr. 2', 'Dr. 3']],
+      ['Other providers', ['Dr. 4', 'Dr. 5']],
     ])
     expect(body.querySelector('.pm-recap-outside .pm-recap-count')!.textContent).toBe('2 providers')
   })
@@ -345,6 +357,36 @@ describe('section headers that take over as the list scrolls', () => {
     // Its own cards keep the location label; the flag and tags are the search's.
     expect(body.querySelector('.pm-card-outside .pm-outside-badge')!.textContent).toBe('📍 Not at your selected location')
     expect(body.querySelector('.pm-reason')).toBeNull()
+  })
+})
+
+describe('a search with no matches', () => {
+  it('says so, and points to the office rather than to matches that are not there', async () => {
+    // Only Rosedale treats it, and the patient picks Towson before searching.
+    const providerQuestion = payload.questions.find((q) => q.id === 'q-provider')!
+    providerQuestion.order_rank = 9
+    const offerings = payload.offerings.splice(0)
+    payload.offerings.push(offerings[1])
+    try {
+      const { body } = await boot()
+      click(body.querySelector('button.pm-option'))
+      await vi.advanceTimersByTimeAsync(400)
+      ;(body.querySelector('select.pm-select') as HTMLSelectElement).value = 'towson'
+      click(body.querySelector('.pm-next-btn'))
+      await vi.advanceTimersByTimeAsync(400)
+      ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '45'
+      click(body.querySelector('.pm-next-btn'))
+      await vi.advanceTimersByTimeAsync(400)
+      click(option(body, 'Yes'))
+      await vi.advanceTimersByTimeAsync(400)
+      expect(Array.from(body.querySelectorAll('.pm-recap-note')).map((n) => n.textContent)).toEqual([
+        'None match your answers. Don’t see your usual provider? Search above or scroll down.',
+        'If your provider is below, they aren’t a match based on your answers. Call the office to learn more.',
+      ])
+    } finally {
+      providerQuestion.order_rank = 1
+      payload.offerings.splice(0, payload.offerings.length, ...offerings)
+    }
   })
 })
 
