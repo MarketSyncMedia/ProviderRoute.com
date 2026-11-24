@@ -1213,7 +1213,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
             'div',
             'pm-recap-note',
             browsing
-              ? 'Providers who treat ' + caseTypeName.toLowerCase() + ' for your case come first. The rest are marked.'
+              ? 'Our whole team is listed below, with the specialists who see your type of visit first.'
               : 'Filtered by your answers.'
           )
         )
@@ -1481,27 +1481,20 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           unmatchedIcon.setAttribute('aria-hidden', 'true')
           unmatchedIcon.textContent = '⚠️'
           unmatchedTitle.appendChild(unmatchedIcon)
-          unmatchedTitle.appendChild(document.createTextNode('Other providers'))
+          unmatchedTitle.appendChild(document.createTextNode('Providers outside your requirements'))
           unmatchedWrap.appendChild(unmatchedTitle)
+          // One plain statement for the whole group. It is true for every
+          // provider here whatever ruled them out (the condition, an age limit,
+          // another answer), because it says only that they don't match the
+          // patient's answers.
           var unmatchedSub = document.createElement('div')
           unmatchedSub.className = 'pm-outside-sub'
           unmatchedSub.textContent =
-            (caseTypeName
-              ? "These providers don't treat " + caseTypeName.toLowerCase() + ' for your case. '
-              : "These providers aren't a match for your case. ") +
-            'Call the office to confirm before booking.'
+            "The providers below don't match your requirements based on your answers above."
           unmatchedWrap.appendChild(unmatchedSub)
           results.appendChild(unmatchedWrap)
           unmatched.forEach(function (provider) {
-            // Say what is actually true: they don't treat the condition, or they
-            // do but not for this patient (their age or another answer ruled
-            // them out).
-            var treatsIt = (self.data.offerings || []).some(function (o) {
-              return o.provider_id === provider.id && o.case_type_id === self.state.selectedCaseTypeId
-            })
-            var what = caseTypeName || 'this'
-            var reason = treatsIt ? "Doesn't treat " + what + ' for your case' : "Doesn't treat " + what
-            var card = self.buildCard(provider, false, reason)
+            var card = self.buildCard(provider, false, true)
             unmatchedCards.push(card)
             results.appendChild(card)
           })
@@ -1650,10 +1643,11 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       })
     },
 
-    // `unmatched` is the badge text for a provider shown to a patient who asked
-    // to browse everyone but who isn't one the answers matched. They are marked
-    // with it, and their contact details come from wherever they do practise
-    // rather than from the patient's case type, which they may not treat at all.
+    // `unmatched` marks a provider shown to a patient who asked to browse
+    // everyone but whom the patient's answers didn't match. They are labeled as
+    // not matching, and their contact details come from wherever they do
+    // practise rather than from the patient's case type, which they may not
+    // see at all.
     buildCard: function (provider, outsideArea, unmatched) {
       var self = this
       var config = this.data.config || {}
@@ -1689,7 +1683,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         outsideBadge.className = 'pm-outside-badge'
         outsideBadge.textContent = outsideArea
           ? '📍 Not at your selected location'
-          : '⚠️ ' + unmatched
+          : "⚠️ Doesn't match your requirements"
         card.appendChild(outsideBadge)
       }
 
