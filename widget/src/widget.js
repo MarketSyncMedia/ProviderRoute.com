@@ -371,7 +371,7 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-header{background:' +
           primaryColor +
           ';color:' + brandTextColor + ';padding:16px;display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:15px;}',
-        '.pm-close{background:none;border:none;color:' + brandTextColor + ';font-size:22px;cursor:pointer;line-height:1;padding:0;font-family:inherit;}',
+        '.pm-close{background:none;border:none;color:' + brandTextColor + ';font-size:22px;cursor:pointer;line-height:1;padding:11px 15px;margin:-11px -15px;font-family:inherit;}',
         '.pm-body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px;display:flex;flex-direction:column;gap:10px;}',
         '.pm-bubble{background:#f1f5f9;border-radius:12px 12px 12px 4px;padding:12px 16px;font-size:14px;line-height:1.5;color:#1e293b;max-width:85%;}',
         '.pm-user-bubble{background:' +
@@ -457,12 +457,12 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         '.pm-find-title{font-size:14px;font-weight:700;color:#0f172a;line-height:1.35;margin-bottom:10px;}',
         '.pm-find-or{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:12px;color:#64748b;}',
         '.pm-find-or::before,.pm-find-or::after{content:"";flex:1;height:1px;background:#e2e8f0;}',
-        '.pm-search{width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;font-family:inherit;}',
+        '.pm-search{width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:16px;font-family:inherit;}',
         '.pm-search:focus{outline:none;border-color:' + primaryColor + ';}',
         '.pm-help{display:block;width:100%;background:#fff;border:2px solid ' + primaryColor + ';color:' + primaryColor + ';border-radius:10px;padding:10px 14px;font-size:14px;font-weight:700;font-family:inherit;text-align:center;cursor:pointer;}',
         '.pm-help::after{content:"\\2192";margin-left:8px;}',
         '.pm-help:hover{background:' + primaryColor + ';color:' + brandTextColor + ';}',
-        '.pm-fallback{text-align:center;padding:16px;}',
+        '.pm-zero-call{border-radius:10px;padding:11px 20px;font-size:14px;}',
         '.pm-fb-msg{font-size:14px;color:#475569;margin-bottom:12px;line-height:1.5;}',
         '.pm-fb-phone{font-weight:700;font-size:16px;color:#1e293b;margin-bottom:16px;}',
         '.pm-restart{background:none;border:2px solid ' +
@@ -472,7 +472,12 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           ';border-radius:10px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}',
         '.pm-disclaimer{font-size:11px;color:#94a3b8;text-align:center;padding:8px;border-top:1px solid #f1f5f9;margin-top:8px;}',
         '.pm-field-col{display:flex;flex-direction:column;gap:8px;}',
-        '@media(max-width:480px){.pm-chat{width:100vw;height:100vh;max-height:100vh;border-radius:0;position:fixed;top:0;left:0;}}',
+        // 100dvh keeps the bottom clear of a phone browser's toolbar; 100vh is the
+        // fallback where it isn't supported.
+        '@media(max-width:480px){.pm-chat{width:100vw;height:100vh;height:100dvh;max-height:100vh;max-height:100dvh;border-radius:0;position:fixed;top:0;left:0;}}',
+        // Touch targets of 44px. The small pills keep their size and grow only
+        // the area that can be tapped.
+        '@media(max-width:480px),(pointer:coarse){.pm-book,.pm-call{display:flex;align-items:center;justify-content:center;min-height:44px;font-size:14px;}.pm-help,.pm-restart,.pm-search,.pm-next-btn{min-height:44px;}.pm-answers-edit,.pm-answer-return,.pm-recap-back{position:relative;}.pm-answers-edit::after,.pm-answer-return::after,.pm-recap-back::after{content:"";position:absolute;top:-13px;right:-6px;bottom:-13px;left:-6px;}}',
         bodyMapStyles(primaryColor),
       ].join('')
       this.shadow.appendChild(style)
@@ -1042,10 +1047,6 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         this.trackEvent('question_answered', this.state.currentQuestionIndex, q.id)
       }
       this.state.answers[q.id] = value
-      if (this.state.activeOfferings.length === 0) {
-        this.showZeroResults()
-        return
-      }
       if (q.question_type === 'location') {
         this.state.selectedLocationId = value
       }
@@ -1061,6 +1062,11 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
           ? this.state.offeringsBeforeBypass.slice()
           : null,
       })
+      // After the snapshot, so the answer that left no one can be changed.
+      if (this.state.activeOfferings.length === 0) {
+        this.showZeroResults()
+        return
+      }
       this.addBubble(displayText, true)
       var body = this.shadow.getElementById('pm-body')
       if (body) {
@@ -1248,7 +1254,8 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
     },
 
     // The patient's own answers played back to them, first thing on the results.
-    buildAnswers: function () {
+    // `editing` starts with the Return buttons showing.
+    buildAnswers: function (editing) {
       var self = this
       var frag = document.createDocumentFragment()
       function el(tag, className, text) {
@@ -1269,11 +1276,15 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
         var editBtn = el('button', 'pm-answers-edit', 'Edit')
         editBtn.type = 'button'
         editBtn.setAttribute('aria-expanded', 'false')
-        editBtn.onclick = function () {
-          var editing = panel.classList.toggle('pm-answers-editing')
-          editBtn.textContent = editing ? 'Done' : 'Edit'
-          editBtn.setAttribute('aria-expanded', String(editing))
+        var setEditing = function (on) {
+          panel.classList.toggle('pm-answers-editing', on)
+          editBtn.textContent = on ? 'Done' : 'Edit'
+          editBtn.setAttribute('aria-expanded', String(on))
         }
+        editBtn.onclick = function () {
+          setEditing(!panel.classList.contains('pm-answers-editing'))
+        }
+        setEditing(Boolean(editing))
         head.appendChild(editBtn)
         panel.appendChild(head)
         panel.appendChild(
@@ -1317,32 +1328,28 @@ import { liveProviderLocations, withSharedValues } from './providerLocations'
       body.innerHTML = ''
       var config = this.data.config || {}
       var div = document.createElement('div')
-      div.className = 'pm-fallback'
-
-      var heading = document.createElement('div')
-      heading.style.cssText = 'font-size:18px;font-weight:700;color:#1e293b;margin-bottom:12px;'
-      heading.textContent = 'No results found'
-      div.appendChild(heading)
-
-      var answersList = document.createElement('div')
-      answersList.style.cssText =
-        'text-align:left;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:10px;'
-      var answerRows = this.getAnswerRows()
-      answerRows.forEach(function (r) {
-        var row = document.createElement('div')
-        row.style.cssText = 'font-size:13px;color:#475569;margin-bottom:8px;line-height:1.4;'
-        row.textContent = r.question + ' → ' + r.answer
-        answersList.appendChild(row)
+      div.className = 'pm-results'
+      var caseType = (this.data.caseTypes || []).find(function (ct) {
+        return ct.id === self.state.selectedCaseTypeId
       })
-      if (answerRows.length) {
-        div.appendChild(answersList)
-      }
+      div.appendChild(
+        this.sectionCard({
+          title: this.specialistsTitle(caseType ? caseType.name : ''),
+          count: '0 matches',
+          note:
+            'No providers match all of your answers. Change one below' +
+            (config.fallback_phone ? ', or call the office.' : '.'),
+        })
+      )
+      // Changing an answer is the way out of here, so the Return buttons are
+      // already showing.
+      div.appendChild(this.buildAnswers(true))
 
       var btnWrap = document.createElement('div')
       btnWrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
       if (config.fallback_phone) {
         var callBtn = document.createElement('a')
-        callBtn.className = 'pm-book'
+        callBtn.className = 'pm-book pm-zero-call'
         callBtn.href = 'tel:' + config.fallback_phone
         callBtn.textContent = 'Call the office'
         callBtn.onclick = function () {
