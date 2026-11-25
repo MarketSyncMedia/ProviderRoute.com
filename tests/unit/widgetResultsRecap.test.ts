@@ -371,6 +371,57 @@ describe('section headers that take over as the list scrolls', () => {
   })
 })
 
+describe('the no results screen', () => {
+  /** Elbow, No, Towson, then an age no provider sees. */
+  async function toNoResults() {
+    const booted = await boot()
+    const { body } = booted
+    await startAs(body, 'No')
+    ;(body.querySelector('select.pm-select') as HTMLSelectElement).value = 'towson'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '150'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    return booted
+  }
+  const returnTo = (body: HTMLElement, question: string) =>
+    Array.from(body.querySelectorAll('.pm-answer-row'))
+      .find((r) => r.querySelector('.pm-answer-q')!.textContent === question)!
+      .querySelector('button.pm-answer-return')
+
+  it('uses the same card and answers panel, with the Return buttons already showing', async () => {
+    const { body } = await toNoResults()
+    expect(body.querySelector('.pm-recap-title')!.textContent).toBe('Elbow Specialists')
+    expect(pills(body)).toEqual(['0 matches'])
+    expect(body.querySelector('.pm-recap-note')!.textContent).toBe(
+      'No providers match all of your answers. Change one below, or call the office.'
+    )
+    expect(body.querySelector('.pm-answers')!.classList.contains('pm-answers-editing')).toBe(true)
+    expect(body.querySelector('.pm-answers-edit')!.textContent).toBe('Done')
+    expect(Array.from(body.querySelectorAll('.pm-answer-a')).map((a) => a.textContent)).toEqual(['Elbow', 'No', 'Towson', '150'])
+    expect(body.querySelector('a.pm-book')!.getAttribute('href')).toBe('tel:4105550100')
+    expect(body.querySelector('button.pm-restart')!.textContent).toBe('Start over')
+  })
+
+  it('lets the patient change the very answer that left no one, and get results', async () => {
+    const { body } = await toNoResults()
+    click(returnTo(body, 'How old are you?'))
+    ;(body.querySelector('input.pm-number-input') as HTMLInputElement).value = '45'
+    click(body.querySelector('.pm-next-btn'))
+    await vi.advanceTimersByTimeAsync(400)
+    expect(pills(body)).toEqual(['2 matches'])
+  })
+
+  it('lets the patient change an earlier answer', async () => {
+    const { pm, body } = await toNoResults()
+    click(returnTo(body, 'Where?'))
+    expect(body.querySelector('select.pm-select')).not.toBeNull()
+    expect(pm.state.answers['q-age']).toBeUndefined()
+    expect(pm.state.answers['q-entry']).toBe('elbow')
+  })
+})
+
 describe('Back to my matches', () => {
   const back = (body: HTMLElement) => body.querySelector('button.pm-recap-back') as HTMLButtonElement
   const matchesGroup = (body: HTMLElement) => body.querySelector('.pm-recap:not(.pm-recap-outside)')!.closest('.pm-group') as HTMLElement
